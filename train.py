@@ -1,406 +1,300 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import sys
+import datetime
+import time
+import json
 import pickle
 import requests
+from pathlib import Path
 
-import matplotlib.pyplot as plt
-
-#from privacy.analysis.rdp_accountant import compute_rdp, get_privacy_spent
-#from privacy.optimizers.dp_optimizer import DPAdamOptimizer
-#from privacy.optimizers.gaussian_query import GaussianAverageQuery
-
-import json
 import numpy as np
-import os
-from subprocess import Popen, PIPE
-import sys
-import time
-
 import tensorflow as tf
-import tensorflow.keras.backend as K
 
-from utils.grad_ops import *
-from utils import utils, patch_ops
-from utils import preprocess
+from models.cnn import *
+from utils.forward import *
+from utils.misc import *
+from utils.load_mnist import *
 
-from tensorflow.keras.callbacks import ModelCheckpoint, TensorBoard, EarlyStopping, ReduceLROnPlateau
+def federate_grads(URL, client_grad, client_header, sleep_delay=0.01):
+    ########## SEND GRADIENT ##########
+    put_successful = False
+    while not put_successful:
+        data = pickle.dumps(client_grad)
+        response = requests.put(
+            URL + "put_grad",
+            data=data, 
+            headers=client_header,
+        )
+        put_successful = pickle.loads(response.content)
+        
+        time.sleep(sleep_delay)
 
-from models.multi_gpu import ModelMGPU
-from models.losses import *
-from models.unet import unet
+    ########## GET AVG GRADIENT ##########
+    server_grad = None
+    while server_grad is None:
+        try:
+            response = requests.get(URL + "get_avg_grad", headers=client_header)
+        except requests.exceptions.ConnectionError:
+            time.sleep(3)
+        server_grad = pickle.loads(response.content)
+        
+        time.sleep(sleep_delay)
 
-os.environ['FSLOUTPUTTYPE'] = 'NIFTI_GZ'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    return server_grad
 
-def running_average(old_average, cur_val, n):
-    return old_average * (n-1)/n + cur_val/n
+if __name__ == '__main__':
+     
+    #################### HYPERPARAMS / ARGS ####################
 
-if __name__ == "__main__":
-
-    results = utils.parse_args("train")
-
-    ########## GPU SETUP ##########
-
-    NUM_GPUS = 1
-    GPU_USAGE = 0.9
-
-    if results.GPUID == None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    elif results.GPUID == -1:
-        # find maximum number of available GPUs
-        call = "nvidia-smi --list-gpus"
-        pipe = Popen(call, shell=True, stdout=PIPE).stdout
-        available_gpus = pipe.read().decode().splitlines()
-        NUM_GPUS = len(available_gpus)
-    else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(results.GPUID)
-
-    #GPU_USAGE = results.GPU_USAGE
-
-    opts = tf.GPUOptions(per_process_gpu_memory_fraction=GPU_USAGE)
-    conf = tf.ConfigProto(gpu_options=opts)
-    tf.enable_eager_execution(config=conf)
-
-    ########## SERVER SETUP ##########
+    WEIGHT_DIR = Path(sys.argv[1])
+    TB_LOG_DIR = Path(sys.argv[2])
+    SITE = sys.argv[3].upper()
+    MODE = sys.argv[4]
+    GPU_ID = sys.argv[5]
+    
+    ### GPU settings ###
+    os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
+    # cut memory consumption in half if not only local training
+    if MODE != "local":
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        tf.config.experimental.set_virtual_device_configuration(
+            gpus[0],
+            [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)],
+        )
+        
+    BATCH_SIZE = 2**12
+    LEARNING_RATE = 1e-3
+    epsilon = 1e-4
+    best_val_loss = 100000 
+    CONVERGENCE_EPOCH_LIMIT = 10
+    convergence_epoch_counter = 0
+    
+    MODEL_NAME = "CNN_mode_{}_site_{}".format(MODE, SITE)
+    experiment = "{}_lr_{}".format(MODEL_NAME, LEARNING_RATE)
+    WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
+    MODEL_PATH = WEIGHT_DIR / (MODEL_NAME + ".json")
+    
+    TB_LOG_DIR = TB_LOG_DIR / "{}_{}".format(
+        datetime.datetime.now().strftime("%Y%m%d-%H%M%S"),
+        experiment,    
+    )
+    
+    train_summary_writer = tf.summary.create_file_writer(str(TB_LOG_DIR / "train"))
+    val_summary_writer = tf.summary.create_file_writer(str(TB_LOG_DIR / "val"))
+    
+    
+    
+    for d in [WEIGHT_DIR, TB_LOG_DIR]:
+        if not d.exists():
+            d.mkdir(parents=True)
+            
+    #################### SERVER SETUP ####################
 
     URL = "http://127.0.0.1:10203/"
-
-    ########## HYPERPARAMETER SETUP ##########
-
-    num_channels = results.num_channels
-    plane = results.plane
-    num_epochs = 1000000
-    num_patches = results.num_patches
-    batch_size = results.batch_size
-    progbar_length = 20
-    ds = 4
-    model = results.model
-    model_architecture = "unet"
-    start_time = utils.now()
-    experiment_details = start_time + "_" + model_architecture + "_" +\
-        results.experiment_details
-    learning_rate = 1e-4
-    PATCH_SIZE = [int(x) for x in results.patch_size.split("x")]
-    try:
-        with open("headers.json", "r") as fp:
-            headers = json.load(fp)
-    except:
-        print("Institution header file not present; exiting.")
+    if MODE == "local":
+        k_init = get_kernel_initializer()
+    elif MODE == "federated":
+        r = requests.get(URL + "kernel_init")
+        k_init = pickle.loads(r.content)
+    else:
+        print("Invalid mode: {}".format(MODE))
         sys.exit()
+    
+    #################### CLIENT SETUP ####################
 
-    utils.save_args_to_csv(results, os.path.join(
-        "results", experiment_details))
+    header = {
+        "content-type": "binary tensor", 
+        "site": SITE, 
+    }
 
-    ########## DIRECTORY SETUP ##########
+    #################### MODEL ####################
 
-    WEIGHT_DIR = os.path.join("models", "weights", experiment_details)
-    TB_LOG_DIR = os.path.join("models", "tensorboard", start_time)
+    model = cnn(k_init)
+    
+    model.save_weights(str(WEIGHT_DIR / "init_weights.h5"))
+     
+    with open(str(MODEL_PATH), 'w') as f:
+        json.dump(model.to_json(), f)
+    
+    opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
 
-    MODEL_NAME = model_architecture + "_model_" + experiment_details
-    MODEL_PATH = os.path.join(WEIGHT_DIR, MODEL_NAME + ".json")
+    # set up metrics
+    train_acc = tf.keras.metrics.Accuracy(name="train_acc")
+    train_loss = tf.keras.metrics.Mean(name="train_loss")
+    val_acc = tf.keras.metrics.Accuracy(name="val_acc")
+    val_loss = tf.keras.metrics.Mean(name="val_loss")
+    
+    #################### LOAD DATA ####################
+    print("Loading MNIST...")
+    x, y, *_ = prepare_mnist(SITE)
 
-    HISTORY_PATH = os.path.join(WEIGHT_DIR, MODEL_NAME + "_history.json")
-    FIGURES_DIR = os.path.join("figures", MODEL_NAME)
+    # if training on both sets, split data in half so the model doesn't 
+    # train with "double data" compared to single site
+    # also cut `BATCH_SIZE` in half
+    if MODE == "federated":
+        x = x[:len(x)//2]
+        y = y[:len(y)//2]
+        BATCH_SIZE = BATCH_SIZE // 2
 
-    # files and paths
-    DATA_DIR = results.SRC_DIR
+    print("Dataset count: {}".format(len(x)))
+    split = int(np.ceil(0.8 * len(x)))
 
-    for d in [WEIGHT_DIR, TB_LOG_DIR]:
-        if not os.path.exists(d):
-            os.makedirs(d)
-
-    ########## WEIGHTS AND OPTIMIZER SETUP ##########
-
-    # shared weights from server
-    r = requests.get(URL + "init_layers")
-    shared_weights = pickle.loads(r.content)
-
-    '''
-    # DP optimizer
-    # TODO: determine good values for DP hyperparams
-    NUM_MICROBATCHES = batch_size // 4
-    l2_norm_clip = 1.0
-    noise_multiplier = 1.1
-
-    dp_average_query = GaussianAverageQuery(
-        l2_norm_clip=l2_norm_clip,
-        sum_stddev=l2_norm_clip * noise_multiplier,
-        denominator=NUM_MICROBATCHES
-    )
-    opt = DPAdamOptimizer(
-        dp_average_query,
-        NUM_MICROBATCHES,
-        learning_rate=learning_rate
-    )
-    '''
-    opt = tf.train.AdamOptimizer(learning_rate=learning_rate)
-
-    ######### MODEL AND CALLBACKS #########
-    model = unet(model_path=MODEL_PATH,
-                 shared_weights=shared_weights,
-                 num_channels=num_channels,
-                 ds=ds,
-                 lr=learning_rate,
-                 verbose=1,)
-
-    shared_layer_indices = []
-    shared_layer_names = [l.name for l in iter(shared_weights)]
-    for i, l in enumerate(model.layers):
-        if l.name in shared_layer_names:
-            shared_layer_indices.append(i)
-
-    monitor = "dice_score"
-
-    ######### PREPROCESS TRAINING DATA #########
-    #DATA_DIR = os.path.join("data", "train")
-    PREPROCESSED_DIR = os.path.join(DATA_DIR, "preprocessed")
-    SKULLSTRIP_SCRIPT_PATH = os.path.join("utils", "CT_BET.sh")
-
-    # TODO: For now, assume preprocessing is done.
-    # For some reason the files want to be preprocessed again?
-    '''
-    preprocess.preprocess_dir(DATA_DIR,
-                              PREPROCESSED_DIR,
-                              SKULLSTRIP_SCRIPT_PATH,)
-
-    ######### DATA IMPORT #########
-    ct_patches, mask_patches = patch_ops.CreatePatchesForTraining(
-        atlasdir=PREPROCESSED_DIR,
-        plane=plane,
-        patchsize=PATCH_SIZE,
-        max_patch=num_patches,
-        num_channels=num_channels
-    )
-    '''
-    ######### DATA IMPORT #########
-    # TODO: this skips the preprocessed step and works directly on the
-    # provided directory
-    ct_patches, mask_patches = patch_ops.CreatePatchesForTraining(
-        atlasdir=DATA_DIR,
-        plane=plane,
-        patchsize=PATCH_SIZE,
-        max_patch=num_patches,
-        num_channels=num_channels
-    )
-
-
-    # VALIDATION SPLIT
-    VAL_SPLIT = int(len(ct_patches)*0.2)
-
-    ct_patches_val = ct_patches[:VAL_SPLIT]
-    mask_patches_val = mask_patches[:VAL_SPLIT]
-    ct_patches = ct_patches[VAL_SPLIT:]
-    mask_patches = mask_patches[VAL_SPLIT:]
-
-
-    print("Individual patch dimensions:", ct_patches[0].shape)
-    print("Num patches:", len(ct_patches))
-    print("ct_patches shape: {}\nmask_patches shape: {}".format(
-        ct_patches.shape, mask_patches.shape))
-
-    ######### TRAINING #########
-    best_val_loss = 1e6
-    loss_diff = 1e6
-    EARLY_STOPPING_THRESHOLD = 1e-4
-    EARLY_STOPPING_EPOCHS = 50
-    early_stopping_counter = 0
-
-    dices = []
-    losses = []
-    val_dices = []
-    val_losses = []
-
-    def step_batch_gradient(inputs, model):
-        x, y_true = inputs
-
-        # forward pass
-        with tf.GradientTape(persistent=True) as tape:
-            y_pred = model(x, training=True)
-            batch_loss = soft_dice_loss(y_true=y_true, y_pred=y_pred)
-            batch_dice = dice_coef(y_true=y_true, y_pred=y_pred)
-
-        batch_grads = tape.gradient(batch_loss, model.trainable_variables)
-
-        return batch_grads, batch_loss, batch_dice
-
-    def step_federated_grad(client_grad, num_grads):
-        ########## SEND GRADIENT ##########
-        r = False
-        while not r:
-            data = pickle.dumps((client_grad, num_grads))
-            r = requests.put(URL + "put_grad",
-                             data=data, headers=headers)
-            r = pickle.loads(r.content)
-            time.sleep(1)
-
-        ########## GET AVG GRADIENT ##########
-        server_grad = False
-        while not server_grad:
-            try:
-                r = requests.get(URL + "get_avg_grad", headers=headers)
-            except requests.exceptions.ConnectionError:
-                time.sleep(0.01)
-            server_grad = pickle.loads(r.content)
-            time.sleep(0.01)
-
-        return client_grad, server_grad
-
-    def step_batch_val(inputs, model):
-        x, y_true = inputs
-
-        y_pred = model(x, training=True)
-        batch_loss = soft_dice_loss(y_true=y_true, y_pred=y_pred)
-        batch_dice = dice_coef(y_true=y_true, y_pred=y_pred)
-
-        return batch_loss, batch_dice
-
-    ##### PROGBAR #####
-    TEMPLATE = "\rEpoch {:03d}/{} [{:{}<{}}] Loss: {:>3.4f} Dice: {:>.4f}"
-    sys.stdout.write(TEMPLATE.format(
-        1,
-        num_epochs,
-        "=" * 0,
-        "-",
-        progbar_length,
-        0.0,
-        0.0,
+    x_train = x[:split]
+    y_train = y[:split]
+    x_val = x[split:]
+    y_val = y[split:]
+    print("Train set count: {}\nValidation set count: {}\n"\
+          .format(len(x_train), len(x_val)))
+    
+    
+    #################### SETUP ####################
+    print("\n{} TRAINING NETWORK {}\n".format(
+        "#"*20,
+        "#"*20,
     ))
+    TEMPLATE = (
+        "\r{: >12} Epoch {: >3d} | "
+        "Epoch Step {: >4d}/{: >4d} | "
+        "Global Step {: >6d} | "
+        "{: >5.2f}s/step | "
+        "ETA: {: >7.2f}s"
+    )
+    
+    elapsed = 0.0
+    cur_epoch = 0
+    global_train_step = 0
+    global_val_step = 0
 
-    training_start_time = time.time()
-    for epoch in range(num_epochs):
-        epoch_start_time = time.time()
-        counter = 0
-        loss = 0
-        val_loss = 0
-        dice_score = 0
-        val_dice_score = 0
+    N_TRAIN_STEPS = len(x_train) // BATCH_SIZE
+    N_VAL_STEPS = len(x_val) // BATCH_SIZE
+    
+    while(True):
+        cur_epoch += 1
+        epoch_st = time.time()
 
-        ### TRAIN STEP ###
-        num_train_steps = int(len(ct_patches))
-        print("\nTraining...")
-        for i in range(0, num_train_steps, batch_size):
-            x = ct_patches[i: i + batch_size]
-            y = mask_patches[i: i + batch_size]
+        # Reset metrics every epoch
+        train_loss.reset_states()
+        train_acc.reset_states()
+        val_loss.reset_states()
+        val_acc.reset_states()
 
-            batch_grads, batch_loss, batch_dice_metric = step_batch_gradient(
-                                                                 (x, y), 
-                                                                 model, 
-                                                             )
+        #################### TRAINING ####################
 
-            # scale up grads by number of samples to allow server averaging
-            scaled_batch_grads = [len(x) * g for g in batch_grads]
-            # send number of samples for this batch as well
-            client_grad, server_grad = step_federated_grad(scaled_batch_grads, len(x))
+        for cur_step, i in enumerate(range(0, len(x_train), BATCH_SIZE)):
+
+            st = time.time()
+
+            xs = x_train[i:i+BATCH_SIZE]
+            ys = y_train[i:i+BATCH_SIZE]
+
+            # Logits are the predictions here
+            grads, loss, preds = forward(
+                inputs=(xs, ys),
+                model=model,
+                loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
+                training=True,
+            )
             
-            loss += batch_loss
-            dice_score += batch_dice_metric
-
-            opt.apply_gradients(zip(server_grad, model.trainable_variables))
-
-            sys.stdout.write(TEMPLATE.format(
-                epoch + 1,
-                num_epochs,
-                "=" * min(
-                        int(progbar_length*(i/num_train_steps)), 
-                        progbar_length
-                        ),
-                "-",
-                progbar_length,
-                loss/(i+1),
-                dice_score/(i+1),
-            ))
-
-        # end of epoch averages
-        loss /= len(ct_patches)
-        dice_score /= len(ct_patches)
-
-        ### VAL STEP ###
-        num_val_steps = int(len(ct_patches_val))
-        print("\nValidating...")
-        for i in range(0, num_val_steps, batch_size):
-            x = ct_patches_val[i: i + batch_size]
-            y = mask_patches_val[i: i + batch_size]
-
-            batch_loss, batch_dice_metric = step_batch_val(
-                                                    (x, y),
-                                                    model
-                                                )
-
-            val_loss += batch_loss
-            val_dice_score += batch_dice_metric
-
-            sys.stdout.write(TEMPLATE.format(
-                epoch + 1,
-                num_epochs,
-                "=" * min(
-                        int(progbar_length*(i/num_val_steps)), 
-                        progbar_length
-                        ),
-                "-",
-                progbar_length,
-                val_loss/(i+1),
-                val_dice_score/(i+1),
-            ))
+            if MODE == "local":
+                opt.apply_gradients(zip(grads, model.trainable_variables))
+            elif MODE == "federated":
+                server_grads = federate_grads(URL, grads, header)
+                opt.apply_gradients(zip(server_grads, model.trainable_variables))
 
 
-            
-        # end of epoch averages
-        val_loss /= len(ct_patches_val)
-        val_dice_score /= len(ct_patches_val)
+            train_loss.update_state(loss)
+            train_acc.update_state(ys, tf.argmax(preds, axis=1))
 
-        sys.stdout.write(" Val Loss: {:.4f} Val Dice: {:.4f}".format(
-            val_loss,
-            val_dice_score,
-        ))
+
+            #################### END-OF-STEP CALCULATIONS ####################
+            with train_summary_writer.as_default():
+                tf.summary.scalar('train_loss', train_loss.result(), step=global_train_step)
+                tf.summary.scalar('train_acc', train_acc.result(), step=global_train_step)
+            global_train_step += 1
+
+            en = time.time()
+            elapsed = running_average(elapsed, en-st, cur_step+1)
+            eta = (N_TRAIN_STEPS - cur_step) * elapsed
+            print(
+                TEMPLATE.format(
+                        "Training",
+                        cur_epoch,
+                        cur_step,
+                        N_TRAIN_STEPS,
+                        global_train_step,
+                        elapsed,
+                        eta,
+                ),
+                end="",
+            )
+
         print()
 
-        ########## END OF EPOCH CALCS ##########
-        epoch_end_time = time.time()
-        print("Epoch time: {:.4f}s".format(epoch_end_time - epoch_start_time))
+        #################### VALIDATION ####################
 
-        loss_diff = np.abs(best_val_loss - val_loss)
+        for cur_step, i in enumerate(range(0, len(x_val), BATCH_SIZE)):
 
-        # early stopping and model checkpoint
-        if val_loss < best_val_loss:
+            st = time.time()
 
-            # checkpoints
-            checkpoint_filename = str(start_time) + "_epoch_{:04d}_".format(
-                epoch) + "dice_{:.4f}_weights.hdf5".format(dice_score)
+            xs = x_val[i:i+BATCH_SIZE]
+            ys = y_val[i:i+BATCH_SIZE]
 
-            checkpoint_filename = os.path.join(
-                WEIGHT_DIR, checkpoint_filename)
+            # Logits are the predictions here
+            loss, preds = forward(
+                inputs=(xs, ys),
+                model=model,
+                loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
+                training=False,
+            )
 
-            best_val_loss = val_loss
-            model.save(checkpoint_filename, overwrite=True,
-                       include_optimizer=False)
+            val_loss.update_state(loss)
+            val_acc.update_state(ys, tf.argmax(preds, axis=1))
+
+            #################### END-OF-STEP CALCULATIONS ####################
+            
+            with val_summary_writer.as_default():
+                tf.summary.scalar('val_loss', val_loss.result(), step=global_val_step)
+                tf.summary.scalar('val_acc', val_acc.result(), step=global_val_step)
+
+            global_val_step += 1
+
+            en = time.time()
+            elapsed = running_average(elapsed, en-st, cur_step+1)
+            eta = (N_VAL_STEPS - cur_step) * elapsed
+            print(
+                TEMPLATE.format(
+                        "Validation",
+                        cur_epoch,
+                        cur_step,
+                        N_VAL_STEPS,
+                        global_val_step,
+                        elapsed,
+                        eta,
+                ),
+                end="",
+            )
+
+        #################### END-OF-EPOCH CALCULATIONS ####################
+            
+        epoch_en = time.time()
+        print("\n\tEpoch elapsed time: {:.2f}s".format(epoch_en-epoch_st))
+        
+        # save weights
+        improved_loss_cond = val_loss.result() < best_val_loss
+        loss_diff_cond = np.abs(val_loss.result() - best_val_loss) > epsilon
+        if improved_loss_cond and loss_diff_cond:
+            print("\t\tLoss improved from {:.4f} to {:.4f}".format(best_val_loss, val_loss.result()))
+            # update best
+            best_val_loss = val_loss.result()
+            # save weights
+            model.save_weights(str(WEIGHT_DIR / "best_weights.h5"))
+            # reset convergence counter
+            convergence_epoch_counter = 0
         else:
-            early_stopping_counter += 1
+            convergence_epoch_counter += 1 
 
-        if early_stopping_counter >= EARLY_STOPPING_EPOCHS and\
-                loss_diff >= EARLY_STOPPING_THRESHOLD:
-            print("\nConvergence criteria reached.\nTerminating")
-            break
-
-        # metrics
-        dices.append(dice_score)
-        losses.append(loss)
-
-        val_dices.append(val_dice_score)
-        val_losses.append(val_loss)
-
-    training_end_time = time.time()
-    print("Training time: {:.4f}s".format(training_end_time - training_start_time))
-
-    fig, axes = plt.subplots(2, sharex=True, figsize=(12, 8))
-    fig.suptitle('Training Curves')
-    axes[0].set_ylabel('Loss', fontsize=14)
-    axes[0].set_xlabel('Batch', fontsize=14)
-    axes[0].plot(losses, label="Training Loss")
-    axes[0].plot(val_losses, label="Validation Loss")
-
-    axes[1].set_ylabel('Dice Coefficient', fontsize=14)
-    axes[1].set_xlabel('Batch', fontsize=14)
-    axes[1].plot(dices, label="Training Dice Coefficient")
-    axes[1].plot(val_dices, label="Valdiation Dice Coefficient")
-
-    plt.legend()
-    plt.savefig(os.path.join(FIGURES_DIR, 'training_curves.png'))
-    K.clear_session()
+        # check for exit 
+        if convergence_epoch_counter >= CONVERGENCE_EPOCH_LIMIT:
+            print("\nConvergence criteria met. Terminating.\n")
+            sys.exit()
