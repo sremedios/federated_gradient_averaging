@@ -20,11 +20,12 @@ from models.cnn import *
 app = Flask(__name__)
 
 allowed_institutes = ["A", "B"]
-expected_grads = {"A": None,
-                   "B": None, }
+
 avg_grads = None
-returned_grad = {"A": False,
-                 "B": False, }
+expected_grads = {"A": None, "B": None}
+returned_grad = {"A": False, "B": False}
+converged_dict = {"A": False, "B": False}
+terminate_requests = {"A": False, "B": False}
 
 
 @app.route('/kernel_init')
@@ -38,7 +39,47 @@ def get_kernel_init():
 
     return pickle.dumps(kernel_initializer)
 
+@app.route('/get_converged')
+def get_converged():
+    global converged_dict
+    
+    # Return True if any site has converged
+    return pickle.dumps(any(g for g in converged_dict.values()))
 
+@app.route('/put_converged', methods=['PUT'])
+def put_converged():
+    global converged_dict
+    
+    # parse header
+    h = request.headers
+    key = h["site"]
+    
+    # update state
+    converged_dict[key] = True
+    
+    # operation completed successfully
+    return pickle.dumps(True)
+
+# TODO: is this even necessary???
+@app.route('/terminate_request', methods=['PUT'])
+def terminate_request():
+    global terminate_requests
+    
+    # parse header
+    h = request.headers
+    key = h["site"]
+    
+    # update state
+    terminate_requests[key] = True
+    
+    # check if time to exit
+    if all(g for g in terminate_requests.values()):
+        print("All models converged. Exiting.")
+        sys.exit()
+    
+    return pickle.dumps(True)
+
+    
 @app.route('/put_grad', methods=['PUT'])
 def put_grad():
     # Typically polled once per batch
@@ -74,6 +115,7 @@ def _average_grads(expected_grads):
 
 @app.route('/get_avg_grad', methods=['GET'])
 def get_avg_grad():
+ 
     # polled many times per batch until all sites are ready
     global avg_grads
     global returned_grad
@@ -84,6 +126,9 @@ def get_avg_grad():
     # there are two situations: The average gradient is ready or it is not
     avg_gradient_ready = avg_grads is not None
     
+    
+    ## TODO: STILL A PROBLEM HERE
+    ## THE GRADIENTS SHOULD WAIT AND SYNCHRONIZE
     if avg_gradient_ready:
         
         # deep copy gradients to permit resetting global `avg_grads`
@@ -92,7 +137,7 @@ def get_avg_grad():
         
         # flag this site as having returned the value
         returned_grad[key] = True
-         
+        
         # reset `avg_grads` once all gradients have been returned
         all_grads_returned = all(v for v in returned_grad.values())
 

@@ -16,7 +16,7 @@ from utils.forward import *
 from utils.misc import *
 from utils.load_mnist import *
 
-def federate_grads(URL, client_grad, client_header, sleep_delay=0.01):
+def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
     ########## SEND GRADIENT ##########
     put_successful = False
     while not put_successful:
@@ -24,7 +24,7 @@ def federate_grads(URL, client_grad, client_header, sleep_delay=0.01):
         response = requests.put(
             URL + "put_grad",
             data=data, 
-            headers=client_header,
+            headers=client_headers,
         )
         put_successful = pickle.loads(response.content)
         
@@ -33,8 +33,21 @@ def federate_grads(URL, client_grad, client_header, sleep_delay=0.01):
     ########## GET AVG GRADIENT ##########
     server_grad = None
     while server_grad is None:
+        
+        # exit if another site converged
+        response = requests.get(URL + "get_converged", headers=client_headers)
+        others_converged = pickle.loads(response.content)
+        if others_converged:
+            print("\nAnother site has converged. Terminating.\n")
+#             requests.put(
+#                 URL + "terminate_request",
+#                 headers=client_headers,
+#             )
+            sys.exit()
+
+        # otherwise continue as normal
         try:
-            response = requests.get(URL + "get_avg_grad", headers=client_header)
+            response = requests.get(URL + "get_avg_grad", headers=client_headers)
         except requests.exceptions.ConnectionError:
             time.sleep(3)
         server_grad = pickle.loads(response.content)
@@ -63,6 +76,7 @@ if __name__ == '__main__':
             [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)],
         )
         
+
     BATCH_SIZE = 2**12
     LEARNING_RATE = 1e-3
     epsilon = 1e-4
@@ -103,7 +117,7 @@ if __name__ == '__main__':
     
     #################### CLIENT SETUP ####################
 
-    header = {
+    client_headers = {
         "content-type": "binary tensor", 
         "site": SITE, 
     }
@@ -189,7 +203,7 @@ if __name__ == '__main__':
             ys = y_train[i:i+BATCH_SIZE]
 
             # Logits are the predictions here
-            grads, loss, preds = forward(
+            client_grads, loss, preds = forward(
                 inputs=(xs, ys),
                 model=model,
                 loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
@@ -197,11 +211,12 @@ if __name__ == '__main__':
             )
             
             if MODE == "local":
-                opt.apply_gradients(zip(grads, model.trainable_variables))
+                grads = client_grads
             elif MODE == "federated":
-                server_grads = federate_grads(URL, grads, header)
-                opt.apply_gradients(zip(server_grads, model.trainable_variables))
-
+                grads = federate_grads(URL, client_grads, client_headers)
+                
+                    
+            opt.apply_gradients(zip(grads, model.trainable_variables))
 
             train_loss.update_state(loss)
             train_acc.update_state(ys, tf.argmax(preds, axis=1))
@@ -296,5 +311,23 @@ if __name__ == '__main__':
 
         # check for exit 
         if convergence_epoch_counter >= CONVERGENCE_EPOCH_LIMIT:
+            converged_success = False
+            # Alert the server when done
+            while not converged_success:
+                try:
+                    response = requests.put(
+                        URL + "put_converged",
+                        headers=client_headers,
+                    )
+                except requests.exceptions.ConnectionError:
+                    time.sleep(3)
+                else:
+                    converged_success = pickle.loads(response.content)
+                    time.sleep(1)
+            
             print("\nConvergence criteria met. Terminating.\n")
+#             requests.put(
+#                 URL + "terminate_request",
+#                 headers=client_headers,
+#             )
             sys.exit()
