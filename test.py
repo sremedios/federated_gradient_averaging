@@ -47,7 +47,7 @@ if __name__ == '__main__':
     MODEL_NAME = "CNN_mode_{}_site_{}".format(MODE, SITE)
     WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
     MODEL_PATH = WEIGHT_DIR / (MODEL_NAME + ".json")
-    BEST_WEIGHTS = WEIGHT_DIR / "best_weights.h5"
+    BEST_WEIGHTS = WEIGHT_DIR / "epoch_100_weights.h5"
     RESULTS_DIR = Path("results")
 
     if not RESULTS_DIR.exists():

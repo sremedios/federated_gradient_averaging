@@ -15,13 +15,12 @@ from models.cnn import *
 from utils.forward import *
 from utils.misc import *
 from utils.load_mnist import *
-from utils.opt_utils import *
 
-def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
-    ########## SEND GRADIENT ##########
+def federate_weights(URL, diff_weights, client_headers, sleep_delay=0.01):
+    ########## SEND WEIGHTS ##########
     put_successful = False
     while not put_successful:
-        data = pickle.dumps(client_grad)
+        data = pickle.dumps(diff_weights)
         response = requests.put(
             URL + "put_val",
             data=data, 
@@ -31,9 +30,9 @@ def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
         
         time.sleep(sleep_delay)
 
-    ########## GET AVG GRADIENT ##########
-    server_grad = None
-    while server_grad is None:
+    ########## GET AVG WEIGHTS ##########
+    server_weights = None
+    while server_weights is None:
         
         # exit if another site converged
         response = requests.get(URL + "get_converged", headers=client_headers)
@@ -47,11 +46,11 @@ def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
             response = requests.get(URL + "get_avg_val", headers=client_headers)
         except requests.exceptions.ConnectionError:
             time.sleep(3)
-        server_grad = pickle.loads(response.content)
+        server_weights = pickle.loads(response.content)
         
         time.sleep(sleep_delay)
 
-    return server_grad
+    return server_weights
 
 if __name__ == '__main__':
     
@@ -62,8 +61,8 @@ if __name__ == '__main__':
     WEIGHT_DIR = Path(sys.argv[1])
     TB_LOG_DIR = Path(sys.argv[2])
     SITE = sys.argv[3].upper()
-    MODE = sys.argv[4]
-    GPU_ID = sys.argv[5]
+    MODE = "modelavg"
+    GPU_ID = sys.argv[4]
     
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
@@ -77,9 +76,6 @@ if __name__ == '__main__':
         
 
     BATCH_SIZE = 2**12
-    N_EPOCHS = 100
-
-    
     LEARNING_RATE = 1e-3
     epsilon = 1e-4
     best_val_loss = 100000 
@@ -108,21 +104,16 @@ if __name__ == '__main__':
     #################### SERVER SETUP ####################
 
     URL = "http://127.0.0.1:10203/"
-    if MODE == "local":
-        k_init = get_kernel_initializer()
-    elif MODE == "federated":
-        r = requests.get(URL + "kernel_init")
-        k_init = pickle.loads(r.content)
-    else:
-        print("Invalid mode: {}".format(MODE))
-        sys.exit()
+    # Initialize identical model at each site
+    r = requests.get(URL + "kernel_init")
+    k_init = pickle.loads(r.content)
     
     #################### CLIENT SETUP ####################
 
     client_headers = {
         "content-type": "binary tensor", 
         "site": SITE, 
-        "val_type": "gradients",
+        "val_type": "weights", 
     }
 
     #################### MODEL ####################
@@ -148,30 +139,34 @@ if __name__ == '__main__':
     
     print("Full dataset count: {}".format(len(x)))
 
-    # if training on both sets, split data in half so the model doesn't 
+    # split data in half so the model doesn't 
     # train with "double data" compared to single site
     # also cut `BATCH_SIZE` in half
-    if SITE == "BOTH":
-        x = x[:len(x)//2]
-        y = y[:len(y)//2]
-        # do not half batch size here, because
-        # BOTH has double batch size of FL
-    elif MODE == "federated":
-        x = x[:len(x)//2]
-        y = y[:len(y)//2]
-        BATCH_SIZE = BATCH_SIZE // 2
-        
+    x = x[:len(x)//2]
+    y = y[:len(y)//2]
+    BATCH_SIZE = BATCH_SIZE // 2
+
     split = int(np.ceil(0.8 * len(x)))
-    
+
     x_train = x[:split]
     y_train = y[:split]
     x_val = x[split:]
     y_val = y[split:]
     
+    
+    # truncate to closest `batch_size` number of samples
+    thresh = int(len(x_train) // BATCH_SIZE * BATCH_SIZE)
+    x_train = x_train[:thresh]
+    y_train = y_train[:thresh]
+    thresh = int(len(x_val) // BATCH_SIZE * BATCH_SIZE)
+    x_val = x_val[:thresh]
+    y_val = y_val[:thresh]
+    
     print("Truncated dataset count: {}".format(len(x_train) + len(x_val)))
     
     print("Train set count: {}\nValidation set count: {}\n"\
           .format(len(x_train), len(x_val)))
+    
     
     #################### SETUP ####################
     print("\n{} TRAINING NETWORK {}\n".format(
@@ -194,7 +189,6 @@ if __name__ == '__main__':
     N_TRAIN_STEPS = len(x_train) // BATCH_SIZE
     N_VAL_STEPS = len(x_val) // BATCH_SIZE
     
-    
     while(True):
         cur_epoch += 1
         epoch_st = time.time()
@@ -204,6 +198,12 @@ if __name__ == '__main__':
         train_acc.reset_states()
         val_loss.reset_states()
         val_acc.reset_states()
+
+        # Reset optimizer every epoch
+        opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
+
+        # keep copy of weights before local training 
+        prev_weights = [layer.numpy().copy() for layer in model.trainable_variables]
 
         #################### TRAINING ####################
 
@@ -215,24 +215,20 @@ if __name__ == '__main__':
             ys = y_train[i:i+BATCH_SIZE]
 
             # Logits are the predictions here
-            client_grads, loss, preds = forward(
+            grads, loss, preds = forward(
                 inputs=(xs, ys),
                 model=model,
                 loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
                 training=True,
             )
-            
-            if MODE == "local":
-                grads = client_grads
-            elif MODE == "federated":
-                grads = federate_grads(URL, client_grads, client_headers)
-                
-                    
+
+            # update model 
             opt.apply_gradients(zip(grads, model.trainable_variables))
+            
 
             train_loss.update_state(loss)
             train_acc.update_state(ys, tf.argmax(preds, axis=1))
-            
+
 
             #################### END-OF-STEP CALCULATIONS ####################
             with train_summary_writer.as_default():
@@ -303,10 +299,18 @@ if __name__ == '__main__':
             )
 
         #################### END-OF-EPOCH CALCULATIONS ####################
-            
+
+        # compute weight difference before/after update
+        diff_weights = [a - b for (a, b) in zip(model.trainable_variables, prev_weights)]
+        # send weights to server and await new weights
+        server_weights = federate_weights(URL, diff_weights, client_headers)
+        # update with new server weights
+        for local_layer, server_layer_weights in zip(model.trainable_variables, server_weights):
+            local_layer.assign(server_layer_weights)
+
         epoch_en = time.time()
         print("\n\tEpoch elapsed time: {:.2f}s".format(epoch_en-epoch_st))
-        
+
         if cur_epoch >= 100:
             model.save_weights(str(WEIGHT_DIR / "epoch_100_weights.h5"))
             script_en = time.time()

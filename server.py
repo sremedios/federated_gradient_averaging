@@ -7,6 +7,7 @@ import sys
 import datetime
 import time
 import json
+from itertools import cycle
 from pathlib import Path
 
 from flask import Flask, request
@@ -21,12 +22,14 @@ app = Flask(__name__)
 
 allowed_institutes = ["A", "B"]
 
-avg_grads = None
-expected_grads = {"A": None, "B": None}
-returned_grad = {"A": False, "B": False}
+avg_vals = None
+expected_vals = {"A": None, "B": None}
+returned_val = {"A": False, "B": False}
 converged_dict = {"A": False, "B": False}
 terminate_requests = {"A": False, "B": False}
 
+# For model averaging, the server must keep a copy of the weights
+server_weights = cnn(iter(get_kernel_initializer())).get_weights()
 
 @app.route('/kernel_init')
 def get_kernel_init():
@@ -60,93 +63,167 @@ def put_converged():
     # operation completed successfully
     return pickle.dumps(True)
 
-# TODO: is this even necessary???
-@app.route('/terminate_request', methods=['PUT'])
-def terminate_request():
-    global terminate_requests
-    
-    # parse header
-    h = request.headers
-    key = h["site"]
-    
-    # update state
-    terminate_requests[key] = True
-    
-    # check if time to exit
-    if all(g for g in terminate_requests.values()):
-        print("All models converged. Exiting.")
-        sys.exit()
-    
-    return pickle.dumps(True)
-
-    
-@app.route('/put_grad', methods=['PUT'])
-def put_grad():
+@app.route('/put_val', methods=['PUT'])
+def put_val():
     # Typically polled once per batch
-    global expected_grads
-    global avg_grads
+    global expected_vals
+    global avg_vals
 
     # parse header
     h = request.headers
     key = h["site"]
     
-    # receive gradients from client
-    client_grads = pickle.loads(request.data)
+    # receive vals from client
+    client_vals = pickle.loads(request.data)
 
-    # store gradients in local dict
-    if expected_grads[key] is None:
-        expected_grads[key] = client_grads
+    # store vals in local dict
+    if expected_vals[key] is None:
+        expected_vals[key] = client_vals
 
     # Check if ready to average and perform average
-    received_all_grads = all(g for g in expected_grads.values())
+    received_all_vals = all(g for g in expected_vals.values())
     
-    if received_all_grads:
+    if received_all_vals:
         # perform average
-        avg_grads = _average_grads(expected_grads)
-        # reset `expected_grads`; no longer needed bc average already calculated
-        expected_grads = {k: None for k in expected_grads.keys()}
+        avg_vals = _average_vals(expected_vals)
+        # reset `expected_vals`; no longer needed bc average already calculated
+        expected_vals = {k: None for k in expected_vals.keys()}
         
     # operation completed successfully
     return pickle.dumps(True)
 
-def _average_grads(expected_grads):
+def _average_vals(expected_vals):
     # calculates mean of weights and biases along correct axis for N models
-    return [tf.reduce_mean(model_tuple, axis=0) for model_tuple in zip(*expected_grads.values())]
+    return [tf.reduce_mean(model_tuple, axis=0) for model_tuple in zip(*expected_vals.values())]
 
-@app.route('/get_avg_grad', methods=['GET'])
-def get_avg_grad():
+@app.route('/get_avg_val', methods=['GET'])
+def get_avg_val():
  
     # polled many times per batch until all sites are ready
-    global avg_grads
-    global returned_grad
+    global avg_vals
+    global returned_val
+    global server_weights
+
+    h = request.headers
+    key = h["site"]
+    val_type = h["val_type"]
+
+    if val_type == "gradients":
+        # there are two situations: The average val is ready or it is not
+        avg_val_ready = avg_vals is not None
+        
+        if avg_val_ready:
+            
+            # deep copy vals to permit resetting global `avg_vals`
+            # while also being able to return their values in the same call
+            return_val = [g.numpy().copy() for g in avg_vals]
+            
+            # flag this site as having returned the value
+            returned_val[key] = True
+            
+            # reset `avg_vals` once all vals have been returned
+            all_vals_returned = all(v for v in returned_val.values())
+
+            if all_vals_returned:
+                # reset avg
+                avg_vals = None
+                # reset tracker
+                returned_val = {k: False for k in returned_val.keys()}
+                
+        else:
+            return_val = None
+
+    elif val_type == "weights":
+        # there are two situations: The average val is ready or it is not
+        avg_val_ready = avg_vals is not None
+        
+        if avg_val_ready:
+            # update server model with weighted average of `avg_vals`, the client server weights
+            # For us, each client does 1 epoch so the weighting scalar is 1
+            server_weights = [a + b for (a,b) in zip(server_weights, avg_vals)]
+
+            # set return value as new weights
+            return_val = server_weights
+
+            # flag this site as having returned the value
+            returned_val[key] = True
+            
+            # reset `avg_vals` once all vals have been returned
+            all_vals_returned = all(v for v in returned_val.values())
+
+            if all_vals_returned:
+                # reset avg
+                avg_vals = None
+                # reset tracker
+                returned_val = {k: False for k in returned_val.keys()}
+                
+        else:
+            return_val = None
+    
+    return pickle.dumps(return_val)
+
+@app.route('/put_cyclic_weights', methods=['PUT'])
+def put_cyclic_weight():
+    # Typically polled once per batch
+    global expected_vals
+
+    # parse header
+    h = request.headers
+    key = h["site"]
+    
+    # receive vals from client
+    client_vals = pickle.loads(request.data)
+
+    # store vals in local dict
+    if expected_vals[key] is None:
+        expected_vals[key] = client_vals
+
+    # operation completed successfully
+    return pickle.dumps(True)
+
+@app.route('/get_cyclic_weights', methods=['GET'])
+def get_cyclic_weight():
+    '''
+    This runs cyclic weight transfer in parallel
+    Site A will train and store weights in expected_vals['A']
+    Site B will train and store weights in expected_vals['B']
+    ...
+    Site Z will train and store weights in expected_vals['Z']
+
+    When finished, site B will call this function and request
+    weights from the previous site, in this case site A.
+
+    If the weights at `expected_vals['A']` are not `None`:
+        1. Make a deep copy of the weight values
+        2. set the weight value at `expected_vals['A']` to `None`
+        3. return the copied values
+    
+    '''
+
+    # polled many times per batch until all sites are ready
+    global expected_vals
 
     h = request.headers
     key = h["site"]
 
-    # there are two situations: The average gradient is ready or it is not
-    avg_gradient_ready = avg_grads is not None
-    
-    
-    ## TODO: STILL A PROBLEM HERE
-    ## THE GRADIENTS SHOULD WAIT AND SYNCHRONIZE
-    if avg_gradient_ready:
-        
-        # deep copy gradients to permit resetting global `avg_grads`
-        # while also being able to return their values in the same call
-        return_val = [g.numpy().copy() for g in avg_grads]
-        
-        # flag this site as having returned the value
-        returned_grad[key] = True
-        
-        # reset `avg_grads` once all gradients have been returned
-        all_grads_returned = all(v for v in returned_grad.values())
+    # get cyclic reverse iterator over expected_vals keys
+    keys = list(expected_vals.keys())
+    cyclic_iter = cycle(iter(reversed(sorted(keys))))
 
-        if all_grads_returned:
-            # reset avg
-            avg_grads = None
-            # reset tracker
-            returned_grad = {k: False for k in returned_grad.keys()}
-            
+    # step until current key
+    cur = None
+    while cur != key:
+        cur = next(cyclic_iter)
+
+    # The result is the next `cyclic_iter` will be the previous site
+    prev_site_key = next(cyclic_iter)
+
+    if expected_vals[prev_site_key] is not None:
+        # deep copy vals to permit resetting
+        # while also being able to return their values in the same call
+        return_val = [vals.numpy().copy() for vals in expected_vals[prev_site_key]]
+        # reset prev_site_key
+        expected_vals[prev_site_key] = None
     else:
         return_val = None
     

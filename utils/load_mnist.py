@@ -11,22 +11,35 @@ def prepare_mnist(site):
     and are in [0,9]
     '''
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+  
+    # get data idx by label
+    train_idx_a = np.where(y_train < 5)[0]
+    train_idx_b = np.where(y_train >= 5)[0]
     
-    fst_half_idx = np.where(y_train < 5)[0]
-    snd_half_idx = np.where(y_train >= 5)[0]
-    thresh = min(len(fst_half_idx), len(snd_half_idx))
+    # Balance by minimum of each
+    thresh = min(len(train_idx_a), len(train_idx_b))
+    train_idx_a = train_idx_a[:thresh]
+    train_idx_b = train_idx_b[:thresh]
+    
 
     if site=="BOTH":
-        train_idx = np.where(y_train <10)[0]
+        # build an index list which is identical to 
+        # multi-site training.
+        # As long as the training batch size, train_idx_a, and
+        # train_idx_b are all multiples of 2, this will
+        # result in equivalent datasets
+        train_idx = []
+        
+        for a, b in zip(train_idx_a, train_idx_b):
+            train_idx.append(a)
+            train_idx.append(b)
+        
+        train_idx = np.array(train_idx)
     elif site=="A":
-        train_idx = np.where(y_train < 5)[0]
+        train_idx = train_idx_a
     elif site=='B':
-        train_idx = np.where(y_train >= 5)[0]
-
-    # This line serves two purposes:
-    # 1) for sites A,B: even number of samples >=5 and < 5
-    # 2) for both sites, cut samples in half (ie: same datacount as single site)
-    train_idx = train_idx[:thresh]
+        train_idx = train_idx_b
+        
 
     return (
         x_train[train_idx][...,np.newaxis].astype(np.float32), 
