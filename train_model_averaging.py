@@ -34,12 +34,6 @@ def federate_weights(URL, diff_weights, client_headers, sleep_delay=0.01):
     server_weights = None
     while server_weights is None:
         
-        # exit if another site converged
-        response = requests.get(URL + "get_converged", headers=client_headers)
-        others_converged = pickle.loads(response.content)
-        if others_converged:
-            print("\nAnother site has converged. Terminating.\n")
-            sys.exit()
 
         # otherwise continue as normal
         try:
@@ -76,7 +70,7 @@ if __name__ == '__main__':
         
 
     BATCH_SIZE = 2**12
-    N_EPOCHS = 200
+    N_EPOCHS = 250
     LEARNING_RATE = 1e-3
     epsilon = 1e-4
     best_val_loss = 100000 
@@ -114,7 +108,8 @@ if __name__ == '__main__':
     client_headers = {
         "content-type": "binary tensor", 
         "site": SITE, 
-        "val_type": "weights", 
+        "val_type": "gradients",
+        "step": "0"
     }
 
     #################### MODEL ####################
@@ -236,6 +231,8 @@ if __name__ == '__main__':
                 tf.summary.scalar('train_loss', train_loss.result(), step=global_train_step)
                 tf.summary.scalar('train_acc', train_acc.result(), step=global_train_step)
             global_train_step += 1
+            # update header
+            client_headers["step"] = str(global_train_step)
 
             en = time.time()
             elapsed = running_average(elapsed, en-st, cur_step+1)

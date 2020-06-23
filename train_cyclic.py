@@ -67,7 +67,7 @@ if __name__ == '__main__':
         )
         
 
-    N_EPOCHS = 200
+    N_EPOCHS = 250
     BATCH_SIZE = 2**12
     LEARNING_RATE = 1e-3
     epsilon = 1e-4
