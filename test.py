@@ -111,6 +111,8 @@ if __name__ == '__main__':
                 color="white" if cm_norm[i, j] > thresh else 'black',
                 fontsize=14,
             )
+
+    print("Balanced accuracy score: {:.4f}".format(bas))
             
     fig.tight_layout()
     plt.title("Balanced accuracy score: {:.2%}".format(bas))
