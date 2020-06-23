@@ -109,6 +109,7 @@ if __name__ == '__main__':
         "content-type": "binary tensor", 
         "site": SITE, 
         "val_type": "weights", 
+        "step": "0",
     }
 
     #################### MODEL ####################
@@ -296,6 +297,9 @@ if __name__ == '__main__':
             )
 
         #################### END-OF-EPOCH CALCULATIONS ####################
+        
+        # update header
+        client_headers['step'] = str(cur_epoch)
 
         # compute weight difference before/after update
         diff_weights = [a - b for (a, b) in zip(model.trainable_variables, prev_weights)]
