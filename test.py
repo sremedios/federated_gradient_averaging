@@ -114,7 +114,7 @@ if __name__ == '__main__':
                 fontsize=14,
             )
 
-    print("Balanced accuracy score: {:.4f}".format(bas))
+    print("Balanced accuracy score: {:.4%}".format(bas))
             
     fig.tight_layout()
     plt.title("Balanced accuracy score: {:.2%}".format(bas))
