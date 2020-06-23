@@ -44,10 +44,12 @@ if __name__ == '__main__':
     MODE = sys.argv[3]
     GPU_ID = sys.argv[4]
 
+
+    N_EPOCHS = 200
     MODEL_NAME = "CNN_mode_{}_site_{}".format(MODE, SITE)
     WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
     MODEL_PATH = WEIGHT_DIR / (MODEL_NAME + ".json")
-    BEST_WEIGHTS = WEIGHT_DIR / "epoch_100_weights.h5"
+    BEST_WEIGHTS = WEIGHT_DIR / ("epoch_{}_weights.h5".format(N_EPOCHS))
     RESULTS_DIR = Path("results")
 
     if not RESULTS_DIR.exists():
