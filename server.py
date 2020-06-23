@@ -20,14 +20,14 @@ from models.cnn import *
 
 
 
-import random
-from tfdeterminism import patch                                                 
-patch()                                                                         
-SEED = 0                                                                        
-os.environ['PYTHONHASHSEED'] = str(SEED)                                        
-random.seed(SEED)                                                               
-np.random.seed(SEED)                                                            
-tf.random.set_seed(SEED)
+# import random
+# from tfdeterminism import patch                                                 
+# patch()                                                                         
+# SEED = 0                                                                        
+# os.environ['PYTHONHASHSEED'] = str(SEED)                                        
+# random.seed(SEED)                                                               
+# np.random.seed(SEED)                                                            
+# tf.random.set_seed(SEED)
 
 
 
@@ -39,8 +39,7 @@ allowed_institutes = ["A", "B"]
 avg_vals = None
 expected_vals = {"A": None, "B": None}
 returned_val = {"A": False, "B": False}
-converged_dict = {"A": False, "B": False}
-terminate_requests = {"A": False, "B": False}
+server_step = 0
 
 # For model averaging, the server must keep a copy of the weights
 server_weights = cnn(iter(get_kernel_initializer())).get_weights()
@@ -56,53 +55,37 @@ def get_kernel_init():
 
     return pickle.dumps(kernel_initializer)
 
-@app.route('/get_converged')
-def get_converged():
-    global converged_dict
-    
-    # Return True if any site has converged
-    return pickle.dumps(any(g for g in converged_dict.values()))
-
-@app.route('/put_converged', methods=['PUT'])
-def put_converged():
-    global converged_dict
-    
-    # parse header
-    h = request.headers
-    key = h["site"]
-    
-    # update state
-    converged_dict[key] = True
-    
-    # operation completed successfully
-    return pickle.dumps(True)
-
 @app.route('/put_val', methods=['PUT'])
 def put_val():
     # Typically polled once per batch
     global expected_vals
     global avg_vals
+    global server_step
 
     # parse header
     h = request.headers
     key = h["site"]
+    client_step = int(h['step'])
+
+    # average on lockstep
+    synchronized = server_step == client_step
+    if not synchronized:
+        return pickle.dumps(False)
     
     # receive vals from client
     client_vals = pickle.loads(request.data)
 
     # store vals in local dict
-    if expected_vals[key] is None:
-        expected_vals[key] = client_vals
-
+    expected_vals[key] = client_vals
+    
     # Check if ready to average and perform average
     received_all_vals = all(g for g in expected_vals.values())
     
     if received_all_vals:
-        # perform average
         avg_vals = _average_vals(expected_vals)
         # reset `expected_vals`; no longer needed bc average already calculated
         expected_vals = {k: None for k in expected_vals.keys()}
-        
+
     # operation completed successfully
     return pickle.dumps(True)
 
@@ -117,14 +100,17 @@ def get_avg_val():
     global avg_vals
     global returned_val
     global server_weights
+    global server_step
 
     h = request.headers
     key = h["site"]
     val_type = h["val_type"]
-
+    client_step = h['step']
+        
     if val_type == "gradients":
         # there are two situations: The average val is ready or it is not
         avg_val_ready = avg_vals is not None
+
         
         if avg_val_ready:
             
@@ -139,13 +125,17 @@ def get_avg_val():
             all_vals_returned = all(v for v in returned_val.values())
 
             if all_vals_returned:
+                # increment server step
+                server_step += 1
                 # reset avg
                 avg_vals = None
                 # reset tracker
                 returned_val = {k: False for k in returned_val.keys()}
                 
+                
         else:
             return_val = None
+            
 
     elif val_type == "weights":
         # there are two situations: The average val is ready or it is not
@@ -246,4 +236,4 @@ def get_cyclic_weight():
 
 
 if __name__ == '__main__':
-    app.run(port=10203)
+    app.run(port=10204)
