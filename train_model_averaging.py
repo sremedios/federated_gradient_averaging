@@ -108,8 +108,7 @@ if __name__ == '__main__':
     client_headers = {
         "content-type": "binary tensor", 
         "site": SITE, 
-        "val_type": "gradients",
-        "step": "0"
+        "val_type": "weights", 
     }
 
     #################### MODEL ####################
@@ -232,7 +231,7 @@ if __name__ == '__main__':
                 tf.summary.scalar('train_acc', train_acc.result(), step=global_train_step)
             global_train_step += 1
             # update header
-            client_headers["step"] = str(global_train_step)
+            client_headers["step"] = str(cur_epoch)
 
             en = time.time()
             elapsed = running_average(elapsed, en-st, cur_step+1)
