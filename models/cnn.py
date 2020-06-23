@@ -1,5 +1,5 @@
 from tensorflow.keras.initializers import glorot_uniform
-from tensorflow.keras.layers import Input, Conv2D, Dense, MaxPooling2D, GlobalAveragePooling2D
+from tensorflow.keras.layers import Input, Conv2D, Dense, MaxPooling2D, GlobalMaxPooling2D
 from tensorflow.keras.models import Model
 
 def get_kernel_initializer(s=0):
@@ -30,8 +30,7 @@ def cnn(k_init):
     a = next(layer_iter)(a)
     a = MaxPooling2D(2)(a)
     a = next(layer_iter)(a)
-    a = MaxPooling2D(2)(a)
-    a = GlobalAveragePooling2D()(a)
+    a = GlobalMaxPooling2D()(a)
     outputs = next(layer_iter)(a)
     
     model = Model(inputs=inputs,outputs=outputs)

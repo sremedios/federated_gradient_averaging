@@ -18,6 +18,20 @@ import tensorflow as tf
 
 from models.cnn import *
 
+
+
+import random
+from tfdeterminism import patch                                                 
+patch()                                                                         
+SEED = 0                                                                        
+os.environ['PYTHONHASHSEED'] = str(SEED)                                        
+random.seed(SEED)                                                               
+np.random.seed(SEED)                                                            
+tf.random.set_seed(SEED)
+
+
+
+
 app = Flask(__name__)
 
 allowed_institutes = ["A", "B"]

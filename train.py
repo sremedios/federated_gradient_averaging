@@ -17,6 +17,21 @@ from utils.misc import *
 from utils.load_mnist import *
 from utils.opt_utils import *
 
+
+
+# import random
+# from tfdeterminism import patch                                                 
+# patch()                                                                         
+# SEED = 0                                                                        
+# os.environ['PYTHONHASHSEED'] = str(SEED)                                        
+# random.seed(SEED)                                                               
+# np.random.seed(SEED)                                                            
+# tf.random.set_seed(SEED)     
+
+
+
+
+
 def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
     ########## SEND GRADIENT ##########
     put_successful = False
@@ -77,7 +92,7 @@ if __name__ == '__main__':
         
 
     BATCH_SIZE = 2**12
-    N_EPOCHS = 100
+    N_EPOCHS = 200
 
     
     LEARNING_RATE = 1e-3
@@ -168,6 +183,14 @@ if __name__ == '__main__':
     x_val = x[split:]
     y_val = y[split:]
     
+#     split = len(x_train) // BATCH_SIZE * BATCH_SIZE
+#     x_train = x_train[:split]
+#     y_train = y_train[:split]
+    
+#     split = len(x_val) // BATCH_SIZE * BATCH_SIZE
+#     x_val = x_val[:split]
+#     y_val = y_val[:split]
+    
     print("Truncated dataset count: {}".format(len(x_train) + len(x_val)))
     
     print("Train set count: {}\nValidation set count: {}\n"\
@@ -213,23 +236,22 @@ if __name__ == '__main__':
 
             xs = x_train[i:i+BATCH_SIZE]
             ys = y_train[i:i+BATCH_SIZE]
-
-            # Logits are the predictions here
+            
+            # Logits == predictions
             client_grads, loss, preds = forward(
                 inputs=(xs, ys),
                 model=model,
                 loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
                 training=True,
             )
-            
+
             if MODE == "local":
                 grads = client_grads
             elif MODE == "federated":
                 grads = federate_grads(URL, client_grads, client_headers)
-                
-                    
+      
             opt.apply_gradients(zip(grads, model.trainable_variables))
-
+            
             train_loss.update_state(loss)
             train_acc.update_state(ys, tf.argmax(preds, axis=1))
             
@@ -247,7 +269,7 @@ if __name__ == '__main__':
                 TEMPLATE.format(
                         "Training",
                         cur_epoch,
-                        cur_step,
+                        cur_step+1,
                         N_TRAIN_STEPS,
                         global_train_step,
                         elapsed,
@@ -293,7 +315,7 @@ if __name__ == '__main__':
                 TEMPLATE.format(
                         "Validation",
                         cur_epoch,
-                        cur_step,
+                        cur_step+1,
                         N_VAL_STEPS,
                         global_val_step,
                         elapsed,
@@ -307,8 +329,8 @@ if __name__ == '__main__':
         epoch_en = time.time()
         print("\n\tEpoch elapsed time: {:.2f}s".format(epoch_en-epoch_st))
         
-        if cur_epoch >= 100:
-            model.save_weights(str(WEIGHT_DIR / "epoch_100_weights.h5"))
+        if cur_epoch >= N_EPOCHS:
+            model.save_weights(str(WEIGHT_DIR / "epoch_{}_weights.h5".format(N_EPOCHS)))
             script_en = time.time()
             print("\n*****Training elapsed time: {:.2f}s*****".format(script_en-script_st))
             sys.exit()

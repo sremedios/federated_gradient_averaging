@@ -67,6 +67,7 @@ if __name__ == '__main__':
         )
         
 
+    N_EPOCHS = 200
     BATCH_SIZE = 2**12
     LEARNING_RATE = 1e-3
     epsilon = 1e-4
@@ -300,8 +301,8 @@ if __name__ == '__main__':
         epoch_en = time.time()
         print("\n\tEpoch elapsed time: {:.2f}s".format(epoch_en-epoch_st))
         
-        if cur_epoch >= 100:
-            model.save_weights(str(WEIGHT_DIR / "epoch_100_weights.h5"))
+        if cur_epoch >= N_EPOCHS:
+            model.save_weights(str(WEIGHT_DIR / "epoch_{}_weights.h5".format(N_EPOCHS)))
             script_en = time.time()
             print("\n*****Training elapsed time: {:.2f}s*****".format(script_en-script_st))
             sys.exit()
