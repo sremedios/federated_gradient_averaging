@@ -50,12 +50,6 @@ def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
     server_grad = None
     while server_grad is None:
         
-        # exit if another site converged
-        response = requests.get(URL + "get_converged", headers=client_headers)
-        others_converged = pickle.loads(response.content)
-        if others_converged:
-            print("\nAnother site has converged. Terminating.\n")
-            sys.exit()
 
         # otherwise continue as normal
         try:
@@ -138,6 +132,7 @@ if __name__ == '__main__':
         "content-type": "binary tensor", 
         "site": SITE, 
         "val_type": "gradients",
+        "step": "0"
     }
 
     #################### MODEL ####################
@@ -214,11 +209,13 @@ if __name__ == '__main__':
     global_train_step = 0
     global_val_step = 0
 
-    N_TRAIN_STEPS = len(x_train) // BATCH_SIZE
-    N_VAL_STEPS = len(x_val) // BATCH_SIZE
+    N_TRAIN_STEPS = int(np.ceil(len(x_train) / BATCH_SIZE))
+    N_VAL_STEPS = int(np.ceil(len(x_val) / BATCH_SIZE))
     
     
     while(True):
+        
+        # update epoch
         cur_epoch += 1
         epoch_st = time.time()
 
@@ -231,6 +228,9 @@ if __name__ == '__main__':
         #################### TRAINING ####################
 
         for cur_step, i in enumerate(range(0, len(x_train), BATCH_SIZE)):
+            
+            
+        
 
             st = time.time()
 
@@ -261,6 +261,8 @@ if __name__ == '__main__':
                 tf.summary.scalar('train_loss', train_loss.result(), step=global_train_step)
                 tf.summary.scalar('train_acc', train_acc.result(), step=global_train_step)
             global_train_step += 1
+            # update header
+            client_headers["step"] = str(global_train_step)
 
             en = time.time()
             elapsed = running_average(elapsed, en-st, cur_step+1)
