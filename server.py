@@ -39,7 +39,7 @@ allowed_institutes = ["A", "B"]
 avg_vals = None
 expected_vals = {"A": None, "B": None}
 returned_val = {"A": False, "B": False}
-server_step = 0
+server_step = None
 
 # For model averaging, the server must keep a copy of the weights
 server_weights = cnn(iter(get_kernel_initializer())).get_weights()
@@ -66,6 +66,16 @@ def put_val():
     h = request.headers
     key = h["site"]
     client_step = int(h['step'])
+    
+    # init
+    if server_step == None:
+        server_step = client_step
+    
+    print("=== {} PUT | Client Step {} | Server Step {} ===".format(
+        key,
+        client_step,
+        server_step,
+    ))
 
     # average on lockstep
     synchronized = server_step == client_step
@@ -106,6 +116,12 @@ def get_avg_val():
     key = h["site"]
     val_type = h["val_type"]
     client_step = h['step']
+    
+    print("=== {} GET | Client Step {} | Server Step {} ===".format(
+        key,
+        client_step,
+        server_step,
+    ))
         
     if val_type == "gradients":
         # there are two situations: The average val is ready or it is not
