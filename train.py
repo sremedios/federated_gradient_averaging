@@ -17,6 +17,15 @@ from utils.misc import *
 from utils.load_mnist import *
 from utils.opt_utils import *
 
+import random
+from tfdeterminism import patch                                                 
+patch()                                                                         
+SEED = 0                                                                        
+os.environ['PYTHONHASHSEED'] = str(SEED)                                        
+random.seed(SEED)                                                               
+np.random.seed(SEED)                                                            
+tf.random.set_seed(SEED)
+
 def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
     ########## SEND ##########
     put_successful = False
@@ -77,7 +86,6 @@ if __name__ == '__main__':
     BATCH_SIZE = 2**12
     N_EPOCHS = 100
     
-
     LEARNING_RATE = 1e-3
     epsilon = 1e-4
     best_val_loss = 100000 
@@ -146,10 +154,7 @@ if __name__ == '__main__':
     val_loss = tf.keras.metrics.Mean(name="val_loss")
     
     #################### LOAD DATA ####################
-    print("Loading MNIST...")
     x, y = prepare_mnist(SITE)
-    
-    print("Full dataset count: {}".format(len(x)))
 
     # if training on both sets, split data in half so the model doesn't 
     # train with "double data" compared to single site
@@ -170,12 +175,6 @@ if __name__ == '__main__':
     y_train = y[:split]
     x_val = x[split:]
     y_val = y[split:]
-    
-    
-    print("Truncated dataset count: {}".format(len(x_train) + len(x_val)))
-    
-    print("Train set count: {}\nValidation set count: {}\n"\
-          .format(len(x_train), len(x_val)))
     
     #################### SETUP ####################
     print("\n{} TRAINING NETWORK {}\n".format(
@@ -267,8 +266,7 @@ if __name__ == '__main__':
                 grads = federate_vals(URL, client_grads, client_headers)
             else:
                 grads = client_grads
-            
-      
+
             opt.apply_gradients(zip(grads, model.trainable_variables))
             
             train_loss.update_state(loss)
