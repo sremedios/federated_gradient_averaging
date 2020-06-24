@@ -17,26 +17,11 @@ from utils.misc import *
 from utils.load_mnist import *
 from utils.opt_utils import *
 
-
-
-# import random
-# from tfdeterminism import patch                                                 
-# patch()                                                                         
-# SEED = 0                                                                        
-# os.environ['PYTHONHASHSEED'] = str(SEED)                                        
-# random.seed(SEED)                                                               
-# np.random.seed(SEED)                                                            
-# tf.random.set_seed(SEED)     
-
-
-
-
-
-def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
-    ########## SEND GRADIENT ##########
+def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
+    ########## SEND ##########
     put_successful = False
     while not put_successful:
-        data = pickle.dumps(client_grad)
+        data = pickle.dumps(client_val)
         response = requests.put(
             URL + "put_val",
             data=data, 
@@ -46,9 +31,9 @@ def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
         
         time.sleep(sleep_delay)
 
-    ########## GET AVG GRADIENT ##########
-    server_grad = None
-    while server_grad is None:
+    ########## GET AVG ##########
+    server_val = None
+    while server_val is None:
         
 
         # otherwise continue as normal
@@ -56,11 +41,11 @@ def federate_grads(URL, client_grad, client_headers, sleep_delay=0.01):
             response = requests.get(URL + "get_avg_val", headers=client_headers)
         except requests.exceptions.ConnectionError:
             time.sleep(3)
-        server_grad = pickle.loads(response.content)
+        server_val = pickle.loads(response.content)
         
         time.sleep(sleep_delay)
 
-    return server_grad
+    return server_val
 
 if __name__ == '__main__':
     
@@ -86,9 +71,8 @@ if __name__ == '__main__':
         
 
     BATCH_SIZE = 2**12
-    N_EPOCHS = 200
+    N_EPOCHS = 250
 
-    
     LEARNING_RATE = 1e-3
     epsilon = 1e-4
     best_val_loss = 100000 
@@ -108,8 +92,6 @@ if __name__ == '__main__':
     train_summary_writer = tf.summary.create_file_writer(str(TB_LOG_DIR / "train"))
     val_summary_writer = tf.summary.create_file_writer(str(TB_LOG_DIR / "val"))
     
-    
-    
     for d in [WEIGHT_DIR, TB_LOG_DIR]:
         if not d.exists():
             d.mkdir(parents=True)
@@ -119,21 +101,23 @@ if __name__ == '__main__':
     URL = "http://127.0.0.1:10203/"
     if MODE == "local":
         k_init = get_kernel_initializer()
-    elif MODE == "federated":
+    else:
         r = requests.get(URL + "kernel_init")
         k_init = pickle.loads(r.content)
-    else:
-        print("Invalid mode: {}".format(MODE))
-        sys.exit()
     
     #################### CLIENT SETUP ####################
 
     client_headers = {
         "content-type": "binary tensor", 
         "site": SITE, 
-        "val_type": "gradients",
-        "step": "0"
+        "val_type": None, # determined later in code
+        "step": None, # determined later in code
     }
+    
+    if MODE == "federated":
+        client_headers["val_type"] = "gradients"
+    elif MODE == "weightavg" or MODE == "cyclic":
+        client_headers["val_type"] = "weights"
 
     #################### MODEL ####################
 
@@ -178,13 +162,6 @@ if __name__ == '__main__':
     x_val = x[split:]
     y_val = y[split:]
     
-#     split = len(x_train) // BATCH_SIZE * BATCH_SIZE
-#     x_train = x_train[:split]
-#     y_train = y_train[:split]
-    
-#     split = len(x_val) // BATCH_SIZE * BATCH_SIZE
-#     x_val = x_val[:split]
-#     y_val = y_val[:split]
     
     print("Truncated dataset count: {}".format(len(x_train) + len(x_val)))
     
@@ -224,13 +201,17 @@ if __name__ == '__main__':
         train_acc.reset_states()
         val_loss.reset_states()
         val_acc.reset_states()
+        
+        if MODE == "weightavg" or MODE == "cyclic":
+            # Reset optimizer every epoch
+            opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
+            
+            # keep copy of weights before local training 
+            prev_weights = [layer.numpy().copy() for layer in model.trainable_variables]
 
         #################### TRAINING ####################
 
         for cur_step, i in enumerate(range(0, len(x_train), BATCH_SIZE)):
-            
-            
-        
 
             st = time.time()
 
@@ -244,11 +225,23 @@ if __name__ == '__main__':
                 loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
                 training=True,
             )
+            
+            '''
+            If federated, then get synchronized gradient updates from server
+            
+            If weightavg, then apply normal gradients. Federation occurs at end of epoch.
+            
+            If cyclic, then apply normal gradients. Federation occurs at end of epoch.
+            
+            If local, then apply normal gradients and train as usual
+            
+            '''
 
-            if MODE == "local":
+            if MODE == "federated":
+                grads = federate_vals(URL, client_grads, client_headers)
+            else:
                 grads = client_grads
-            elif MODE == "federated":
-                grads = federate_grads(URL, client_grads, client_headers)
+            
       
             opt.apply_gradients(zip(grads, model.trainable_variables))
             
@@ -261,8 +254,25 @@ if __name__ == '__main__':
                 tf.summary.scalar('train_loss', train_loss.result(), step=global_train_step)
                 tf.summary.scalar('train_acc', train_acc.result(), step=global_train_step)
             global_train_step += 1
-            # update header
-            client_headers["step"] = str(global_train_step)
+            
+            '''
+            Update header.
+            
+            If federated, sync on every step (ie: batch).
+            
+            If weightavg, sync on every epoch
+            
+            If cyclic, sync on every epoch
+            
+            Note that updating this header value multiple times per epoch in the
+            cases `weightavg` and `cyclic` is fine.
+            
+            If local, headers aren't sent anywhere.
+            '''
+            if mode == "federated":
+                client_headers["step"] = str(global_train_step)
+            else:
+                client_headers["step"] = str(cur_epoch)
 
             en = time.time()
             elapsed = running_average(elapsed, en-st, cur_step+1)
@@ -327,10 +337,32 @@ if __name__ == '__main__':
             )
 
         #################### END-OF-EPOCH CALCULATIONS ####################
+        
+        '''
+        Federate `weightavg` and `cyclic` modes.
+        
+        '''
+        if MODE == "weightavg":
+            # compute weight difference before/after update
+            diff_weights = [a - b for (a, b) in zip(model.trainable_variables, prev_weights)]
+            # send weights to server and await new weights
+            server_weights = federate_vals(URL, diff_weights, client_headers)
+            # update with new server weights
+            for local_layer, server_layer_weights in zip(model.trainable_variables, server_weights):
+                local_layer.assign(server_layer_weights)
+        elif MODE == "cyclic":
+            client_weights = model.trainable_variables
+            # send weights to server and await new weights
+            server_weights = federate_vals(URL, client_weights, client_headers)
+            # update with new server weights
+            for local_layer, server_layer_weights in zip(model.trainable_variables, server_weights):
+                local_layer.assign(server_layer_weights)
             
+        # Elapsed epoch time
         epoch_en = time.time()
         print("\n\tEpoch elapsed time: {:.2f}s".format(epoch_en-epoch_st))
         
+        # Convergence criteria
         if cur_epoch >= N_EPOCHS:
             model.save_weights(str(WEIGHT_DIR / "epoch_{}_weights.h5".format(N_EPOCHS)))
             script_en = time.time()

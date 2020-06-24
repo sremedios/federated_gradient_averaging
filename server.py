@@ -19,19 +19,6 @@ import tensorflow as tf
 from models.cnn import *
 
 
-
-# import random
-# from tfdeterminism import patch                                                 
-# patch()                                                                         
-# SEED = 0                                                                        
-# os.environ['PYTHONHASHSEED'] = str(SEED)                                        
-# random.seed(SEED)                                                               
-# np.random.seed(SEED)                                                            
-# tf.random.set_seed(SEED)
-
-
-
-
 app = Flask(__name__)
 
 allowed_institutes = ["A", "B"]
@@ -41,7 +28,7 @@ expected_vals = {"A": None, "B": None}
 returned_val = {"A": False, "B": False}
 server_step = None
 
-# For model averaging, the server must keep a copy of the weights
+# For weight averaging, the server must keep a copy of the weights
 server_weights = cnn(iter(get_kernel_initializer())).get_weights()
 
 @app.route('/kernel_init')
@@ -158,7 +145,7 @@ def get_avg_val():
         avg_val_ready = avg_vals is not None
         
         if avg_val_ready:
-            # update server model with weighted average of `avg_vals`, the client server weights
+            # update server weights with weighted average of `avg_vals`, the client server weights
             # For us, each client does 1 epoch so the weighting scalar is 1
             server_weights = [a + b for (a,b) in zip(server_weights, avg_vals)]
 
@@ -252,4 +239,4 @@ def get_cyclic_weight():
 
 
 if __name__ == '__main__':
-    app.run(port=10204)
+    app.run(port=10203)

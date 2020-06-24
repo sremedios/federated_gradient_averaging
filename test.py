@@ -45,7 +45,7 @@ if __name__ == '__main__':
     GPU_ID = sys.argv[4]
 
 
-    N_EPOCHS = 200
+    N_EPOCHS = 250
     MODEL_NAME = "CNN_mode_{}_site_{}".format(MODE, SITE)
     WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
     MODEL_PATH = WEIGHT_DIR / (MODEL_NAME + ".json")
