@@ -29,7 +29,8 @@ returned_val = {"A": False, "B": False}
 server_step = None
 
 # For weight averaging, the server must keep a copy of the weights
-server_weights = cnn(iter(get_kernel_initializer())).get_weights()
+server_weights = cnn(iter(get_kernel_initializer())).trainable_variables
+
 
 @app.route('/kernel_init')
 def get_kernel_init():
@@ -48,11 +49,13 @@ def put_val():
     global expected_vals
     global avg_vals
     global server_step
+    global server_weights
 
     # parse header
     h = request.headers
     key = h["site"]
     client_step = int(h['step'])
+    mode = h['mode']
     
     # init
     if server_step == None:
@@ -64,7 +67,7 @@ def put_val():
         server_step,
     ))
 
-    # average on lockstep
+    # put on lockstep
     synchronized = server_step == client_step
     if not synchronized:
         return pickle.dumps(False)
@@ -75,16 +78,26 @@ def put_val():
     # store vals in local dict
     expected_vals[key] = client_vals
     
-    # Check if ready to average and perform average
-    received_all_vals = all(g for g in expected_vals.values())
-    
-    if received_all_vals:
-        avg_vals = _average_vals(expected_vals)
-        # reset `expected_vals`; no longer needed bc average already calculated
-        expected_vals = {k: None for k in expected_vals.keys()}
+    '''
+    For both federated and weightavg modes, average the received values
+    For cyclic mode, do not average
+    '''
+    if mode != "cyclic":
+        # Check if ready to average and perform average
+        received_all_vals = all(g for g in expected_vals.values())
+
+        if received_all_vals:
+            avg_vals = _average_vals(expected_vals)
+            
+            if mode == "weightavg":
+                # update server weights with averaged client weight differences
+                server_weights = [a + b for (a,b) in zip(server_weights, avg_vals)]
+            # reset `expected_vals`; no longer needed bc average already calculated
+            expected_vals = {k: None for k in expected_vals.keys()}
 
     # operation completed successfully
     return pickle.dumps(True)
+
 
 def _average_vals(expected_vals):
     # calculates mean of weights and biases along correct axis for N models
@@ -109,84 +122,42 @@ def get_avg_val():
         client_step,
         server_step,
     ))
-        
-    if val_type == "gradients":
-        # there are two situations: The average val is ready or it is not
-        avg_val_ready = avg_vals is not None
+    
+     # there are two situations: The average val is ready or it is not
+    avg_val_ready = avg_vals is not None
 
+
+    if avg_val_ready:
         
-        if avg_val_ready:
-            
+        # Handle weights and gradients slightly differently
+        
+        if val_type == "gradients":
             # deep copy vals to permit resetting global `avg_vals`
             # while also being able to return their values in the same call
             return_val = [g.numpy().copy() for g in avg_vals]
-            
-            # flag this site as having returned the value
-            returned_val[key] = True
-            
-            # reset `avg_vals` once all vals have been returned
-            all_vals_returned = all(v for v in returned_val.values())
-
-            if all_vals_returned:
-                # increment server step
-                server_step += 1
-                # reset avg
-                avg_vals = None
-                # reset tracker
-                returned_val = {k: False for k in returned_val.keys()}
-                
-                
-        else:
-            return_val = None
-            
-
-    elif val_type == "weights":
-        # there are two situations: The average val is ready or it is not
-        avg_val_ready = avg_vals is not None
-        
-        if avg_val_ready:
-            # update server weights with weighted average of `avg_vals`, the client server weights
-            # For us, each client does 1 epoch so the weighting scalar is 1
-            server_weights = [a + b for (a,b) in zip(server_weights, avg_vals)]
-
+        elif val_type == "weights":
             # set return value as new weights
             return_val = server_weights
 
-            # flag this site as having returned the value
-            returned_val[key] = True
-            
-            # reset `avg_vals` once all vals have been returned
-            all_vals_returned = all(v for v in returned_val.values())
+        # flag this site as having returned the value
+        returned_val[key] = True
 
-            if all_vals_returned:
-                # reset avg
-                avg_vals = None
-                # reset tracker
-                returned_val = {k: False for k in returned_val.keys()}
-                
-        else:
-            return_val = None
+        # reset `avg_vals` once all vals have been returned
+        all_vals_returned = all(v for v in returned_val.values())
+
+        if all_vals_returned:
+            # increment server step
+            server_step += 1
+            # reset avg
+            avg_vals = None
+            # reset tracker
+            returned_val = {k: False for k in returned_val.keys()}
+
+    else:
+        return_val = None
     
     return pickle.dumps(return_val)
 
-@app.route('/put_cyclic_weights', methods=['PUT'])
-def put_cyclic_weight():
-    # Typically polled once per batch
-    global expected_vals
-
-    # parse header
-    h = request.headers
-    key = h["site"]
-    
-    # receive vals from client
-    client_vals = pickle.loads(request.data)
-
-    # store vals in local dict
-    if expected_vals[key] is None:
-        expected_vals[key] = client_vals
-
-    # operation completed successfully
-    return pickle.dumps(True)
 
 @app.route('/get_cyclic_weights', methods=['GET'])
 def get_cyclic_weight():
@@ -209,6 +180,8 @@ def get_cyclic_weight():
 
     # polled many times per batch until all sites are ready
     global expected_vals
+    global returned_val
+    global server_step
 
     h = request.headers
     key = h["site"]
@@ -231,6 +204,18 @@ def get_cyclic_weight():
         return_val = [vals.numpy().copy() for vals in expected_vals[prev_site_key]]
         # reset prev_site_key
         expected_vals[prev_site_key] = None
+        
+        # flag this site as having returned the value
+        returned_val[key] = True
+
+        # reset `avg_vals` once all vals have been returned
+        all_vals_returned = all(v for v in returned_val.values())
+
+        if all_vals_returned:
+            # increment server step
+            server_step += 1
+            # reset tracker
+            returned_val = {k: False for k in returned_val.keys()}
     else:
         return_val = None
     

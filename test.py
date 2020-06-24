@@ -45,7 +45,7 @@ if __name__ == '__main__':
     GPU_ID = sys.argv[4]
 
 
-    N_EPOCHS = 250
+    N_EPOCHS = 100
     MODEL_NAME = "CNN_mode_{}_site_{}".format(MODE, SITE)
     WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
     MODEL_PATH = WEIGHT_DIR / (MODEL_NAME + ".json")
@@ -64,7 +64,7 @@ if __name__ == '__main__':
     model.load_weights(str(BEST_WEIGHTS))
     
     #################### LOAD DATA ####################
-    *_, x_test, y_true = prepare_mnist(SITE)
+    x_test, y_true = prepare_mnist("test")
     
     #################### PREDICT ####################
     logits = model(x_test, training=False)
