@@ -68,11 +68,9 @@ if __name__ == '__main__':
      
     #################### HYPERPARAMS / ARGS ####################
 
-    WEIGHT_DIR = Path(sys.argv[1])
-    TB_LOG_DIR = Path(sys.argv[2])
-    SITE = sys.argv[3].upper()
-    MODE = sys.argv[4]
-    GPU_ID = sys.argv[5]
+    SITE = sys.argv[1].upper()
+    MODE = sys.argv[2]
+    GPU_ID = sys.argv[3]
     
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
@@ -84,20 +82,16 @@ if __name__ == '__main__':
             [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)],
         )
         
-    # Hyperparams
-    
+    # Hyperparams 
     BATCH_SIZE = 2**12
-    N_EPOCHS = 100
-    
+    N_EPOCHS = 100   
     LEARNING_RATE = 1e-3
-    epsilon = 1e-4
-    best_val_loss = 100000 
-    CONVERGENCE_EPOCH_LIMIT = 10
-    convergence_epoch_counter = 0
-    
-    RESET_MOMENTUM = False
 
-    MODEL_NAME = "CNN_mode_{}_site_{}".format(MODE, SITE)
+    RESET_MOMENTUM = False
+    
+    WEIGHT_DIR = Path("models/weights/MNIST")
+    TB_LOG_DIR = Path("results/tb/MNIST")
+    MODEL_NAME = "mode_{}_site_{}".format(MODE, SITE)
     experiment = "{}_lr_{}".format(MODEL_NAME, LEARNING_RATE)
     WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
     MODEL_PATH = WEIGHT_DIR / (MODEL_NAME + ".json")
@@ -141,7 +135,7 @@ if __name__ == '__main__':
 
     #################### MODEL ####################
 
-    model = cnn(k_init)
+    model = cnn(k_init, n_channels=1, n_classes=10)
     
     model.save_weights(str(WEIGHT_DIR / "init_weights.h5"))
      

@@ -11,7 +11,7 @@ def get_kernel_initializer(s=0):
         yield glorot_uniform(seed=s)
         s += 1
     
-def cnn(k_init):
+def cnn(k_init, n_channels, n_classes):
     
     k_iter = iter(k_init)
     # Initialize layers with weights
@@ -20,13 +20,13 @@ def cnn(k_init):
         Conv2D(16, 3, activation='relu', padding='same', kernel_initializer=next(k_iter)),
         Conv2D(16, 3, activation='relu', padding='same', kernel_initializer=next(k_iter)),
         Conv2D(16, 3, activation='relu', padding='same', kernel_initializer=next(k_iter)),
-        Dense(10, kernel_initializer=next(k_iter)),
+        Dense(n_classes, kernel_initializer=next(k_iter)),
     ]
     
     layer_iter = iter(weighted_layers)
     
     # Construct model
-    inputs = Input((None, None, 1))
+    inputs = Input((None, None, n_channels))
     a = next(layer_iter)(inputs)
     a = MaxPooling2D(2)(a)
     a = next(layer_iter)(a)

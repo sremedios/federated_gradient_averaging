@@ -38,19 +38,20 @@ if __name__ == '__main__':
     
     #################### HYPERPARAMS / ARGS ####################
 
-    
-    WEIGHT_DIR = Path(sys.argv[1])
+    WEIGHT_DIR = Path("models/weights")
+    DATASET = sys.argv[1] # either "MNIST" or "HAM10000"
     SITE = sys.argv[2].upper()
     MODE = sys.argv[3]
     GPU_ID = sys.argv[4]
+    
 
-
-    N_EPOCHS = 100
-    MODEL_NAME = "CNN_mode_{}_site_{}".format(MODE, SITE)
+    WEIGHT_DIR = Path("models/weights") / DATASET
+    RESULTS_DIR = Path("results") / DATASET
+    MODEL_NAME = "mode_{}_site_{}".format(MODE, SITE)
     WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
     MODEL_PATH = WEIGHT_DIR / (MODEL_NAME + ".json")
     BEST_WEIGHTS = WEIGHT_DIR / ("epoch_{}_weights.h5".format(N_EPOCHS))
-    RESULTS_DIR = Path("results")
+    
 
     if not RESULTS_DIR.exists():
         RESULTS_DIR.mkdir(parents=True)
@@ -64,18 +65,35 @@ if __name__ == '__main__':
     model.load_weights(str(BEST_WEIGHTS))
     
     #################### LOAD DATA ####################
-    x_test, y_true = prepare_mnist("test")
+    if DATASET == "MNIST":
+        class_names = list(range(10))
+        x_test, y_true = prepare_mnist("test")
     
-    #################### PREDICT ####################
-    logits = model(x_test, training=False)
-    preds = tf.nn.softmax(logits, axis=1)
-    y_pred = [tf.argmax(p).numpy() for p in preds]
+        #################### PREDICT ####################
+        logits = model(x_test, training=False)
+        preds = tf.nn.softmax(logits, axis=1)
+        y_pred = [tf.argmax(p).numpy() for p in preds]
+    else:
+        class_names = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
+        img_shape = (450, 600, 3)
+        fname_iters = get_iters("test", DATA_DIR, class_names)
+        
+        #################### PREDICT ####################
+        y_pred = []
+        y_true = []
+        for c in class_names:
+            for fname in fname_iters[c]:
+                x_test = load_preprocess(fname)
+                y_true.append(class_names.index(c))
+                logit = model(x_test, training=False)
+                pred = tf.nn.softmax(logit, axis=1)
+                y_pred.append(tf.argmax(pred).numpy())
+
     
     bas = balanced_accuracy_score(y_true, y_pred)
     
     #################### CONFUSION MATRIX ####################
-    class_names = list(range(10))
-
+   
     cm = confusion_matrix(
         y_true, 
         y_pred,

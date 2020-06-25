@@ -16,7 +16,8 @@ import pickle
 import numpy as np
 import tensorflow as tf
 
-from models.cnn import *
+import models.cnn
+import models.resnet
 
 # Determinism
 import random
@@ -29,6 +30,9 @@ np.random.seed(SEED)
 tf.random.set_seed(SEED)
 
 
+dataset = sys.argv[1] # MNIST or HAM10000
+
+
 app = Flask(__name__)
 
 allowed_institutes = ["A", "B"]
@@ -39,7 +43,19 @@ returned_val = {"A": False, "B": False}
 server_step = None
 
 # For weight averaging, the server must keep a copy of the weights
-server_weights = cnn(iter(get_kernel_initializer())).trainable_variables
+if dataset == "MNIST":
+    server_weights = cnn.cnn(
+        iter(cnn.get_kernel_initializer())
+    ).trainable_variables
+    
+else:
+    server_weights = resnet.resnet18(
+        k_init=iter(resnet.get_kernel_initializer()), 
+        n_classes=7, 
+        n_channels=3, 
+        ds=4, 
+    ).trainable_variables
+    
 
 
 @app.route('/kernel_init')
@@ -48,7 +64,7 @@ def get_kernel_init():
     
     # this number should be at least the number of expected
     # layers in the model
-    n_expected_layers = 100
+    n_expected_layers = 1000
     kernel_initializer = [next(k_iter) for _ in range(n_expected_layers)]
 
     return pickle.dumps(kernel_initializer)
