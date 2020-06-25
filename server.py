@@ -18,8 +18,9 @@ import tensorflow as tf
 
 from models.cnn import *
 
+# Determinism
 import random
-from tfdeterminism import patch                                                 
+from tfdeterminism import patch   
 patch()                                                                         
 SEED = 0                                                                        
 os.environ['PYTHONHASHSEED'] = str(SEED)                                        

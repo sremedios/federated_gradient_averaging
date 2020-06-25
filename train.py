@@ -1,5 +1,6 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 import sys
 import datetime
 import time
@@ -17,14 +18,16 @@ from utils.misc import *
 from utils.load_mnist import *
 from utils.opt_utils import *
 
+# Determinism
 import random
-from tfdeterminism import patch                                                 
+from tfdeterminism import patch   
 patch()                                                                         
 SEED = 0                                                                        
 os.environ['PYTHONHASHSEED'] = str(SEED)                                        
 random.seed(SEED)                                                               
 np.random.seed(SEED)                                                            
 tf.random.set_seed(SEED)
+
 
 def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
     ########## SEND ##########
@@ -235,6 +238,7 @@ if __name__ == '__main__':
             '''
             if MODE == "federated":
                 client_headers["step"] = str(global_train_step)
+                
             else:
                 client_headers["step"] = str(cur_epoch)
 
@@ -266,7 +270,7 @@ if __name__ == '__main__':
                 grads = federate_vals(URL, client_grads, client_headers)
             else:
                 grads = client_grads
-
+                
             opt.apply_gradients(zip(grads, model.trainable_variables))
             
             train_loss.update_state(loss)

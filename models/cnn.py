@@ -1,6 +1,10 @@
+import tensorflow as tf
+
 from tensorflow.keras.initializers import glorot_uniform
 from tensorflow.keras.layers import Input, Conv2D, Dense, MaxPooling2D, GlobalMaxPooling2D
 from tensorflow.keras.models import Model
+
+tf.keras.backend.set_floatx('float64')
 
 def get_kernel_initializer(s=0):
     while True:
