@@ -86,19 +86,19 @@ def resnet18(k_init, n_classes, n_channels, ds=1):
     block_2 = residual_block(
         prev_layer=block_1, 
         repetitions=2, 
-        num_filters=64//ds,
+        num_filters=128//ds,
         k_iter=k_iter,
     )
     block_3 = residual_block(
         prev_layer=block_2, 
         repetitions=2, 
-        num_filters=64//ds,
+        num_filters=256//ds,
         k_iter=k_iter,
     )
     block_4 = residual_block(
         prev_layer=block_3, 
         repetitions=2, 
-        num_filters=64//ds,
+        num_filters=512//ds,
         k_iter=k_iter,
     )
 

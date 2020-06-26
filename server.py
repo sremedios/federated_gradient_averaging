@@ -16,8 +16,7 @@ import pickle
 import numpy as np
 import tensorflow as tf
 
-import models.cnn
-import models.resnet
+from models.cnn import *
 
 # Determinism
 import random
@@ -42,19 +41,14 @@ expected_vals = {"A": None, "B": None}
 returned_val = {"A": False, "B": False}
 server_step = None
 
+k_init = iter(get_kernel_initializer())
+
 # For weight averaging, the server must keep a copy of the weights
 if dataset == "MNIST":
-    server_weights = cnn.cnn(
-        iter(cnn.get_kernel_initializer())
-    ).trainable_variables
-    
+    server_weights = cnn(k_init, n_channels=1, n_classes=10).trainable_variables
 else:
-    server_weights = resnet.resnet18(
-        k_init=iter(resnet.get_kernel_initializer()), 
-        n_classes=7, 
-        n_channels=3, 
-        ds=4, 
-    ).trainable_variables
+    #server_weights = cnn(k_init, n_channels=3, n_classes=7).trainable_variables
+    server_weights = resnet18(k_init, n_classes=7, n_channels=3, ds=4).trainable_variables
     
 
 
@@ -250,4 +244,4 @@ def get_cyclic_weight():
 
 
 if __name__ == '__main__':
-    app.run(port=10203)
+    app.run(host="0.0.0.0", port=10203)
