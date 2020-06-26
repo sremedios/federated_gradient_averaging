@@ -11,6 +11,13 @@ def prepare_mnist(site):
     and are in [0,9]
     '''
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    
+    if site == "test":
+        return (
+            x_test[...,np.newaxis].astype(np.float64), 
+            y_test.astype(np.int64),
+        )
+        
   
     # get data idx by label
     train_idx_a = np.where(y_train < 5)[0]
@@ -42,8 +49,6 @@ def prepare_mnist(site):
         
 
     return (
-        x_train[train_idx][...,np.newaxis].astype(np.float32), 
-        y_train[train_idx].astype(np.int32), 
-        x_test[...,np.newaxis].astype(np.float32), 
-        y_test.astype(np.int32),
+        x_train[train_idx][...,np.newaxis].astype(np.float64), 
+        y_train[train_idx].astype(np.int64), 
     )
