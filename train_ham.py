@@ -18,6 +18,8 @@ from utils.misc import *
 from utils.load_ham import *
 from utils.opt_utils import *
 
+
+'''
 # Determinism
 import random
 from tfdeterminism import patch   
@@ -27,7 +29,7 @@ os.environ['PYTHONHASHSEED'] = str(SEED)
 random.seed(SEED)                                                               
 np.random.seed(SEED)                                                            
 tf.random.set_seed(SEED)
-
+'''
 
 def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
     ########## SEND ##########
@@ -72,17 +74,11 @@ if __name__ == '__main__':
     MODE = sys.argv[2]
     GPU_ID = sys.argv[3]
     DATA_DIR = Path(sys.argv[4])
+    PORT = sys.argv[5]
     
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
-    # cut memory consumption in half if not only local training
-    if MODE != "local":
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        tf.config.experimental.set_virtual_device_configuration(
-            gpus[0],
-            [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)],
-        )
-        
+
     # Hyperparams 
     BATCH_SIZE = 42
     N_EPOCHS = 100   
@@ -111,7 +107,7 @@ if __name__ == '__main__':
             
     #################### SERVER SETUP ####################
 
-    URL = "http://127.0.0.1:10203/"
+    URL = "http://0.0.0.0:{}/".format(PORT)
     if MODE == "local":
         k_init = get_kernel_initializer()
     else:
@@ -157,6 +153,9 @@ if __name__ == '__main__':
     data = get_iters(SITE, DATA_DIR, class_names)
     # unpack
     fnames_iter_train, fnames_iter_val, max_length_train, max_length_val = data
+
+    if MODE == "federated":
+        BATCH_SIZE = BATCH_SIZE // 2
 
     #################### SETUP ####################
     print("\n{} TRAINING NETWORK {}\n".format(
