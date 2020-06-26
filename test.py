@@ -4,6 +4,7 @@ import sys
 import datetime
 import time
 import json
+from tqdm import tqdm
 from pathlib import Path
 
 import tensorflow as tf
@@ -13,6 +14,7 @@ import numpy as np
 from sklearn.metrics import confusion_matrix, balanced_accuracy_score
 
 from utils.load_mnist import *
+from utils.load_ham import *
 
 tick_size = 20
 
@@ -43,6 +45,8 @@ if __name__ == '__main__':
     SITE = sys.argv[2].upper()
     MODE = sys.argv[3]
     GPU_ID = sys.argv[4]
+
+    N_EPOCHS = 100
     
 
     WEIGHT_DIR = Path("models/weights") / DATASET
@@ -74,22 +78,26 @@ if __name__ == '__main__':
         preds = tf.nn.softmax(logits, axis=1)
         y_pred = [tf.argmax(p).numpy() for p in preds]
     else:
+        DATA_DIR = Path("/nfs/masi/hansencb/HAM10000")
         class_names = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
         img_shape = (450, 600, 3)
         fname_iters = get_iters("test", DATA_DIR, class_names)
-        
+
         #################### PREDICT ####################
         y_pred = []
         y_true = []
         for c in class_names:
-            for fname in fname_iters[c]:
-                x_test = load_preprocess(fname)
+            for fname in tqdm(fname_iters[c]):
+                x_test = load_preprocess_fname(fname)
+                x_test = x_test[np.newaxis, ...]
+                
                 y_true.append(class_names.index(c))
+                
+                
                 logit = model(x_test, training=False)
                 pred = tf.nn.softmax(logit, axis=1)
-                y_pred.append(tf.argmax(pred).numpy())
-
-    
+                y_pred.append(tf.argmax(pred, axis=1).numpy()[0])
+                
     bas = balanced_accuracy_score(y_true, y_pred)
     
     #################### CONFUSION MATRIX ####################

@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
-from models.cnn import *
+from models.resnet import *
 from utils.forward import *
 from utils.misc import *
 from utils.load_ham import *
@@ -78,9 +78,8 @@ if __name__ == '__main__':
     
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
-
     # Hyperparams 
-    BATCH_SIZE = 42
+    BATCH_SIZE = 14 # 42
     N_EPOCHS = 100   
     LEARNING_RATE = 1e-3
 
@@ -132,7 +131,8 @@ if __name__ == '__main__':
 
     #################### MODEL ####################
 
-    model = cnn(k_init, n_channels=3, n_classes=7)
+    #model = cnn(k_init, n_channels=3, n_classes=7)
+    model = resnet18(k_init, n_classes=7, n_channels=3, ds=4)
     
     model.save_weights(str(WEIGHT_DIR / "init_weights.h5"))
      
@@ -279,6 +279,9 @@ if __name__ == '__main__':
         print()
 
         #################### VALIDATION ####################
+        
+        # reset validation iterators
+        _, fnames_iter_val, _, _ = get_iters(SITE, DATA_DIR, class_names)
 
         for c in class_names:
             for fname in fnames_iter_val[c]:
