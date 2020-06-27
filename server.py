@@ -16,7 +16,8 @@ import pickle
 import numpy as np
 import tensorflow as tf
 
-from models.cnn import *
+from models import cnn
+from models import resnet
 
 '''
 # Determinism
@@ -43,20 +44,25 @@ expected_vals = {"A": None, "B": None}
 returned_val = {"A": False, "B": False}
 server_step = None
 
-k_init = iter(get_kernel_initializer())
+
 
 # For weight averaging, the server must keep a copy of the weights
 if dataset == "MNIST":
-    server_weights = cnn(k_init, n_channels=1, n_classes=10).trainable_variables
+    k_init = iter(cnn.get_kernel_initializer())
+    server_weights = cnn.cnn(k_init, n_channels=1, n_classes=10).trainable_variables
 else:
     #server_weights = cnn(k_init, n_channels=3, n_classes=7).trainable_variables
-    server_weights = resnet18(k_init, n_classes=7, n_channels=3, ds=4).trainable_variables
+    k_init = iter(resnet.get_kernel_initializer())
+    server_weights = resnet.resnet18(k_init, n_classes=7, n_channels=3, ds=4).trainable_variables
     
 
 
 @app.route('/kernel_init')
 def get_kernel_init():
-    k_iter = iter(get_kernel_initializer())
+    if dataset == "MNIST":
+        k_iter = iter(cnn.get_kernel_initializer())
+    else:
+        k_iter = iter(resnet.get_kernel_initializer())
     
     # this number should be at least the number of expected
     # layers in the model

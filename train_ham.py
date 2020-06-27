@@ -79,7 +79,7 @@ if __name__ == '__main__':
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
     # Hyperparams 
-    BATCH_SIZE = 14 # 42
+    BATCH_SIZE = 42
     N_EPOCHS = 100   
     LEARNING_RATE = 1e-4
 
@@ -147,7 +147,7 @@ if __name__ == '__main__':
     
     #################### LOAD DATA ####################
     class_names = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
-    img_shape = (450, 600, 3)
+    img_shape = (224, 224, 3)
     data = get_iters(SITE, DATA_DIR, class_names)
     # unpack
     fnames_iter_train, fnames_iter_val, max_length_train, max_length_val = data
@@ -300,13 +300,8 @@ if __name__ == '__main__':
 
                 val_loss.update_state(loss)
                 val_acc.update_state(ys, tf.argmax(preds, axis=1))
-
-                #################### END-OF-STEP CALCULATIONS ####################
                 
-                with val_summary_writer.as_default():
-                    tf.summary.scalar('val_loss', val_loss.result(), step=global_val_step)
-                    tf.summary.scalar('val_acc', val_acc.result(), step=global_val_step)
-
+                
                 global_val_step += 1
 
                 en = time.time()
@@ -325,6 +320,13 @@ if __name__ == '__main__':
                     end="",
                 )
 
+        #################### END-OF-VAL CALCULATIONS ####################
+
+        with val_summary_writer.as_default():
+            tf.summary.scalar('val_loss', val_loss.result(), step=cur_epoch)
+            tf.summary.scalar('val_acc', val_acc.result(), step=cur_epoch)
+
+               
         #################### END-OF-EPOCH CALCULATIONS ####################
         
         
