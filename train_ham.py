@@ -81,10 +81,8 @@ if __name__ == '__main__':
     # Hyperparams 
     BATCH_SIZE = 14 # 42
     N_EPOCHS = 100   
-    LEARNING_RATE = 1e-3
+    LEARNING_RATE = 1e-4
 
-    RESET_MOMENTUM = False
-    
     WEIGHT_DIR = Path("models/weights/HAM10000")
     TB_LOG_DIR = Path("results/tb/HAM10000")
     MODEL_NAME = "mode_{}_site_{}".format(MODE, SITE)
@@ -189,12 +187,11 @@ if __name__ == '__main__':
         val_loss.reset_states()
         val_acc.reset_states()
         
-        if RESET_MOMENTUM:
-            opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
-        
         if MODE == "weightavg":
             # keep copy of weights before local training 
             prev_weights = [layer.numpy().copy() for layer in model.trainable_variables]
+            # reset momentum
+            opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
 
         #################### TRAINING ####################
 
