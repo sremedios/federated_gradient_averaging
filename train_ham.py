@@ -283,7 +283,7 @@ if __name__ == '__main__':
             for fname in fnames_iter_val[c]:
                 st = time.time()
 
-                x = load_preprocess_fname(fname)
+                x = load_preprocess_fname(fname, img_shape[:-1])
                 y = class_names.index(c)
                 xs = x[np.newaxis,...]
                 ys = np.array(y, dtype=np.int64)[np.newaxis,...]
