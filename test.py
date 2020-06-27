@@ -80,7 +80,7 @@ if __name__ == '__main__':
     else:
         DATA_DIR = Path("/nfs/masi/hansencb/HAM10000")
         class_names = ['MEL', 'NV', 'BCC', 'AKIEC', 'BKL', 'DF', 'VASC']
-        img_shape = (450, 600, 3)
+        img_shape = (224, 224, 3)
         fname_iters = get_iters("test", DATA_DIR, class_names)
 
         #################### PREDICT ####################
@@ -88,7 +88,7 @@ if __name__ == '__main__':
         y_true = []
         for c in class_names:
             for fname in tqdm(fname_iters[c]):
-                x_test = load_preprocess_fname(fname)
+                x_test = load_preprocess_fname(fname, img_shape[:-1])
                 x_test = x_test[np.newaxis, ...]
                 
                 y_true.append(class_names.index(c))
