@@ -6,14 +6,15 @@ import sys
 import os
 import itertools
 import time
-
+import cv2
 
 def normalize_img(img):
     # RGB has max val of 255
     return img / 255.
 
-def load_preprocess_fname(fname):
+def load_preprocess_fname(fname, target_shape):
     x = np.array(Image.open(fname), dtype=np.float64)
+    x = cv2.resize(x, target_shape, interpolation=cv2.INTER_LINEAR)
     x = normalize_img(x)
     return x
 
@@ -135,7 +136,11 @@ def get_batch(fname_iters, class_names, img_shape, batch_size):
 
     for y, class_name in enumerate(class_names):
         for j in range(n_samples_per_class):
-            xs[i] = load_preprocess_fname(next(fname_iters[class_name]))
+            # load and preprocess next item in iterator
+            x = load_preprocess_fname(next(fname_iters[class_name]), img_shape[:-1])
+            
+            # add to batch
+            xs[i] = x
             ys[i] = y
             i += 1
 

@@ -103,7 +103,7 @@ def resnet18(k_init, n_classes, n_channels, ds=1):
     )
 
     x = GlobalAveragePooling2D()(block_4)
-    outputs = Dense(n_classes)(x)
+    outputs = Dense(n_classes, kernel_initializer=next(k_iter))(x)
 
     model = Model(inputs=inputs, outputs=outputs)
 
@@ -149,7 +149,7 @@ def resnet34(k_init, n_classes, n_channels, ds=1):
     )
 
     x = GlobalAveragePooling2D()(block_4)
-    outputs = Dense(n_classes)(x)
+    outputs = Dense(n_classes, kernel_initializer=next(k_iter))(x)
 
     model = Model(inputs=inputs, outputs=outputs)
 
