@@ -185,7 +185,7 @@ if __name__ == '__main__':
 
     #################### MODEL ####################
 
-    model = reduced_unet(k_init, ds=1)
+    model = reduced_unet(k_init, ds=16)
     
     model.save_weights(str(WEIGHT_DIR / "init_weights.h5"))
      
