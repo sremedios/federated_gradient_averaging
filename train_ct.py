@@ -7,16 +7,20 @@ import time
 import json
 import pickle
 import requests
+import operator
 from pathlib import Path
+from tqdm import tqdm
 
 import numpy as np
 import tensorflow as tf
+import nibabel as nib
+from sklearn.utils import shuffle
 
-from models.cnn import *
+from models.reduced_unet import *
+from models.losses import *
 from utils.forward import *
 from utils.misc import *
-from utils.load_mnist import *
-from utils.opt_utils import *
+from utils.patch_ops import *
 
 # Determinism
 import random
@@ -28,6 +32,14 @@ random.seed(SEED)
 np.random.seed(SEED)                                                            
 tf.random.set_seed(SEED)
 
+def normalize_img(x):
+    # clipt, then 0 mean unit variance
+    min_ct_intensity = 0 # water, accounts for CSF
+    max_ct_intensity = 150 # blood + 50 for noise
+    x[x <= min_ct_intensity] = 0
+    x[x >= max_ct_intensity] = 0
+    return x / max_ct_intensity
+ 
 
 def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
     ########## SEND ##########
@@ -62,6 +74,47 @@ def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
     return server_val
 
 
+def get_training_pair(x_list, y_list, i_list, batch_size):
+    # keep batches even split of positive and negative patches
+    xs_pos = []
+    ys_pos = []
+    
+    while len(xs_pos) < batch_size:
+
+        # select a random subject from the list
+        rand_idx = np.random.choice(len(x_list))
+        
+        # window selection
+        i = next(i_list[rand_idx])
+        
+        hemorrhage_present = y_list[rand_idx][i].sum() > 0
+
+        if hemorrhage_present:
+            # Take copies for the batch to allow augmentation
+            x = x_list[rand_idx][i].copy()
+            y = y_list[rand_idx][i].copy()
+
+            # random flip along X-axis
+            if np.random.choice([True, False]):
+                x = x[::-1, ...]
+                y = y[::-1, ...]
+
+            # random flip along Y-axis
+            if np.random.choice([True, False]):
+                x = x[:, ::-1, ...]
+                y = y[:, ::-1, ...]
+
+            xs_pos.append(x)
+            ys_pos.append(y)
+
+    xs = np.array(xs_pos)
+    ys = np.array(ys_pos)
+
+    xs, ys = shuffle(xs, ys, random_state=int(time.time()))
+
+    return xs, ys
+
+
 if __name__ == '__main__':
     
     script_st = time.time()
@@ -71,27 +124,20 @@ if __name__ == '__main__':
     SITE = sys.argv[1].upper()
     MODE = sys.argv[2]
     GPU_ID = sys.argv[3]
-    PORT = sys.argv[4]
+    DATA_DIR = Path(sys.argv[4])
+    PORT = sys.argv[5]
     
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
-    # cut memory consumption in half if not only local training
-    if MODE != "local":
-        gpus = tf.config.experimental.list_physical_devices('GPU')
-        tf.config.experimental.set_virtual_device_configuration(
-            gpus[0],
-            [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)],
-        )
         
     # Hyperparams 
-    BATCH_SIZE = 2**12
-    N_EPOCHS = 100   
-    LEARNING_RATE = 1e-3
+    PATCH_SIZE = (64, 64, 1)
+    BATCH_SIZE = 128
+    N_EPOCHS = 100
+    LEARNING_RATE = 1e-4
 
-    RESET_MOMENTUM = False
-    
-    WEIGHT_DIR = Path("models/weights/MNIST")
-    TB_LOG_DIR = Path("results/tb/MNIST")
+    WEIGHT_DIR = Path("models/weights/CT")
+    TB_LOG_DIR = Path("results/tb/CT")
     MODEL_NAME = "mode_{}_site_{}".format(MODE, SITE)
     experiment = "{}_lr_{}".format(MODEL_NAME, LEARNING_RATE)
     WEIGHT_DIR = WEIGHT_DIR / MODEL_NAME
@@ -111,7 +157,7 @@ if __name__ == '__main__':
             
     #################### SERVER SETUP ####################
 
-    URL = "http://127.0.0.1:{}/".format(PORT)
+    URL = "http://0.0.0.0:{}/".format(PORT)
     if MODE == "local":
         k_init = get_kernel_initializer()
     else:
@@ -136,7 +182,7 @@ if __name__ == '__main__':
 
     #################### MODEL ####################
 
-    model = cnn(k_init, n_channels=1, n_classes=10)
+    model = reduced_unet(k_init, ds=1)
     
     model.save_weights(str(WEIGHT_DIR / "init_weights.h5"))
      
@@ -146,34 +192,50 @@ if __name__ == '__main__':
     opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
 
     # set up metrics
-    train_acc = tf.keras.metrics.Accuracy(name="train_acc")
+    train_dice = tf.keras.metrics.Mean(name="train_dice")
     train_loss = tf.keras.metrics.Mean(name="train_loss")
-    val_acc = tf.keras.metrics.Accuracy(name="val_acc")
+    val_dice = tf.keras.metrics.Mean(name="val_dice")
     val_loss = tf.keras.metrics.Mean(name="val_loss")
     
     #################### LOAD DATA ####################
-    x, y = prepare_mnist(SITE)
+    fpaths = sorted(DATA_DIR.iterdir())
+    ct_fpaths = sorted([x for x in fpaths if "CT" in x.name and not x.is_dir()])
+    mask_fpaths = sorted([x for x in fpaths if "mask" in x.name and not x.is_dir()])
+    
+    ct_vols = []
+    mask_vols = []
+    
+    for ct_fpath, mask_fpath in tqdm(zip(ct_fpaths, mask_fpaths), total=len(ct_fpaths)):
+        ct = nib.load(ct_fpath).get_fdata(dtype=np.float32)
+        ct = normalize_img(ct)
+        ct_vols.append(ct)
 
-    # if training on both sets, split data in half so the model doesn't 
-    # train with "double data" compared to single site
-    # also cut `BATCH_SIZE` in half
-    if SITE == "BOTH":
-        x = x[:len(x)//2]
-        y = y[:len(y)//2]
-        # do not half batch size here, because
-        # BOTH has double batch size of FL
-    elif MODE == "federated":
-        x = x[:len(x)//2]
-        y = y[:len(y)//2]
-        BATCH_SIZE = BATCH_SIZE // 2
+        mask = nib.load(mask_fpath).get_fdata(dtype=np.float32)
+        mask_vols.append(mask)
         
-    split = int(np.ceil(0.8 * len(x)))
+        
+    split = int(0.8 * len(ct_fpaths))
     
-    x_train = x[:split]
-    y_train = y[:split]
-    x_val = x[split:]
-    y_val = y[split:]
+    ct_vols_train = ct_vols[:split]
+    mask_vols_train = mask_vols[:split]
     
+    ct_vols_val = ct_vols[split:]
+    mask_vols_val = mask_vols[split:]
+        
+    # get patches
+    patch_indices_train = []
+    for ct in ct_vols_train:
+        idx = get_random_patch_indices(ct.shape, PATCH_SIZE)
+        patch_indices_train.append(idx)
+        
+    patch_indices_val = []
+    for ct in ct_vols_val:
+        idx = get_random_patch_indices(ct.shape, PATCH_SIZE)
+        patch_indices_val.append(idx)
+
+    if MODE == "federated":
+        BATCH_SIZE = BATCH_SIZE // 2
+
     #################### SETUP ####################
     print("\n{} TRAINING NETWORK {}\n".format(
         "#"*20,
@@ -192,8 +254,10 @@ if __name__ == '__main__':
     global_train_step = 0
     global_val_step = 0
 
-    N_TRAIN_STEPS = int(np.ceil(len(x_train) / BATCH_SIZE))
-    N_VAL_STEPS = int(np.ceil(len(x_val) / BATCH_SIZE))
+	# previous paper used 1000 patches x 32 samples per epoch
+	# our method will be based on that
+    N_TRAIN_STEPS = int(32000 // BATCH_SIZE)
+    N_VAL_STEPS = int((32000 * 0.2) // BATCH_SIZE)
     
     
     while(True):
@@ -202,20 +266,19 @@ if __name__ == '__main__':
 
         # Reset metrics every epoch
         train_loss.reset_states()
-        train_acc.reset_states()
+        train_dice.reset_states()
         val_loss.reset_states()
-        val_acc.reset_states()
-        
-        if RESET_MOMENTUM:
-            opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
+        val_dice.reset_states()
         
         if MODE == "weightavg":
             # keep copy of weights before local training 
             prev_weights = [layer.numpy().copy() for layer in model.trainable_variables]
+            # reset momentum
+            opt = tf.optimizers.Adam(learning_rate=LEARNING_RATE)
 
         #################### TRAINING ####################
 
-        for cur_step, i in enumerate(range(0, len(x_train), BATCH_SIZE)):
+        for cur_step in range(N_TRAIN_STEPS):
             
             '''
             Update header.
@@ -239,14 +302,18 @@ if __name__ == '__main__':
 
             st = time.time()
 
-            xs = x_train[i:i+BATCH_SIZE]
-            ys = y_train[i:i+BATCH_SIZE]
-            
+            xs, ys = get_training_pair(
+                ct_vols_train,
+                mask_vols_train, 
+                patch_indices_train, 
+                batch_size=BATCH_SIZE, 
+            )
+
             # Logits == predictions
             client_grads, loss, preds = forward(
                 inputs=(xs, ys),
                 model=model,
-                loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
+                loss_fn=soft_dice_loss,
                 training=True,
             )
             
@@ -269,13 +336,13 @@ if __name__ == '__main__':
             opt.apply_gradients(zip(grads, model.trainable_variables))
             
             train_loss.update_state(loss)
-            train_acc.update_state(ys, tf.argmax(preds, axis=1))
+            train_dice.update_state(dice_coef(preds, ys))
             
 
             #################### END-OF-STEP CALCULATIONS ####################
             with train_summary_writer.as_default():
                 tf.summary.scalar('train_loss', train_loss.result(), step=global_train_step)
-                tf.summary.scalar('train_acc', train_acc.result(), step=global_train_step)
+                tf.summary.scalar('train_dice', train_dice.result(), step=global_train_step)
             global_train_step += 1
             
             en = time.time()
@@ -293,37 +360,35 @@ if __name__ == '__main__':
                 ),
                 end="",
             )
-
+            
         print()
 
         #################### VALIDATION ####################
-
-        for cur_step, i in enumerate(range(0, len(x_val), BATCH_SIZE)):
+        
+        for cur_step in range(N_VAL_STEPS):
 
             st = time.time()
 
-            xs = x_val[i:i+BATCH_SIZE]
-            ys = y_val[i:i+BATCH_SIZE]
+            xs, ys = get_training_pair(
+                ct_vols_val,
+                mask_vols_val, 
+                patch_indices_val, 
+                batch_size=BATCH_SIZE, 
+            )
 
-            # Logits are the predictions here
+            # Logits == predictions
             loss, preds = forward(
                 inputs=(xs, ys),
                 model=model,
-                loss_fn=tf.nn.sparse_softmax_cross_entropy_with_logits,
+                loss_fn=soft_dice_loss,
                 training=False,
             )
-
+            
             val_loss.update_state(loss)
-            val_acc.update_state(ys, tf.argmax(preds, axis=1))
+            val_dice.update_state(dice_coef(preds, ys))
+            
 
             #################### END-OF-STEP CALCULATIONS ####################
-            
-            with val_summary_writer.as_default():
-                tf.summary.scalar('val_loss', val_loss.result(), step=global_val_step)
-                tf.summary.scalar('val_acc', val_acc.result(), step=global_val_step)
-
-            global_val_step += 1
-
             en = time.time()
             elapsed = running_average(elapsed, en-st, cur_step+1)
             eta = (N_VAL_STEPS - cur_step) * elapsed
@@ -339,8 +404,17 @@ if __name__ == '__main__':
                 ),
                 end="",
             )
+            
+        print()
 
+               
         #################### END-OF-EPOCH CALCULATIONS ####################
+		# write validation summary
+		with train_summary_writer.as_default():
+			tf.summary.scalar('val_loss', val_loss.result(), step=cur_epoch)
+			tf.summary.scalar('val_dice', val_dice.result(), step=cur_epoch)
+		global_val_step += 1
+            
         
         
         '''
