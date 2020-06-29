@@ -18,6 +18,7 @@ from utils.misc import *
 from utils.load_mnist import *
 from utils.opt_utils import *
 
+'''
 # Determinism
 import random
 from tfdeterminism import patch   
@@ -27,6 +28,7 @@ os.environ['PYTHONHASHSEED'] = str(SEED)
 random.seed(SEED)                                                               
 np.random.seed(SEED)                                                            
 tf.random.set_seed(SEED)
+'''
 
 
 def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
@@ -71,6 +73,7 @@ if __name__ == '__main__':
     SITE = sys.argv[1].upper()
     MODE = sys.argv[2]
     GPU_ID = sys.argv[3]
+    PORT = sys.argv[4]
     
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
@@ -110,7 +113,7 @@ if __name__ == '__main__':
             
     #################### SERVER SETUP ####################
 
-    URL = "http://127.0.0.1:10203/"
+    URL = "http://127.0.0.1:{}/".format(PORT)
     if MODE == "local":
         k_init = get_kernel_initializer()
     else:
