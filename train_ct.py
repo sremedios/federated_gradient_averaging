@@ -139,6 +139,11 @@ if __name__ == '__main__':
     N_EPOCHS = 100
     LEARNING_RATE = 1e-4
 
+    if MODE == "federated" or MODE == "weightavg":
+        BATCH_SIZE = BATCH_SIZE // 2
+    if MODE == "cyclic":
+        N_EPOCHS = 2 * N_EPOCHS
+
     WEIGHT_DIR = Path("models/weights/CT")
     TB_LOG_DIR = Path("results/tb/CT")
     MODEL_NAME = "mode_{}_site_{}".format(MODE, SITE)
@@ -237,8 +242,6 @@ if __name__ == '__main__':
         idx = get_random_patch_indices(ct.shape, PATCH_SIZE)
         patch_indices_val.append(idx)
 
-    if MODE == "federated":
-        BATCH_SIZE = BATCH_SIZE // 2
 
     #################### SETUP ####################
     print("\n{} TRAINING NETWORK {}\n".format(
@@ -451,7 +454,7 @@ if __name__ == '__main__':
         
         # Convergence criteria
         if cur_epoch >= N_EPOCHS:
-            model.save_weights(str(WEIGHT_DIR / "epoch_{}_weights.h5".format(N_EPOCHS)))
+            model.save_weights(str(WEIGHT_DIR / "final_weights.h5".format(N_EPOCHS)))
             script_en = time.time()
             print("\n*****Training elapsed time: {:.2f}s*****".format(script_en-script_st))
             sys.exit()
