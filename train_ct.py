@@ -135,7 +135,7 @@ if __name__ == '__main__':
         
     # Hyperparams 
     PATCH_SIZE = (64, 64, 1)
-    BATCH_SIZE = 128
+    BATCH_SIZE = 256
     N_EPOCHS = 100
     LEARNING_RATE = 1e-4
 
@@ -185,7 +185,8 @@ if __name__ == '__main__':
 
     #################### MODEL ####################
 
-    model = reduced_unet(k_init, ds=1)
+    model = reduced_unet(k_init, ds=8)
+    print(model.summary())
     
     model.save_weights(str(WEIGHT_DIR / "init_weights.h5"))
      
