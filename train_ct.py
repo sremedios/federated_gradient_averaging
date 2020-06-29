@@ -24,13 +24,13 @@ from utils.patch_ops import *
 
 # Determinism
 import random
-from tfdeterminism import patch   
-patch()                                                                         
+#from tfdeterminism import patch   
+#patch()                                                                         
 SEED = 0                                                                        
 os.environ['PYTHONHASHSEED'] = str(SEED)                                        
 random.seed(SEED)                                                               
 np.random.seed(SEED)                                                            
-tf.random.set_seed(SEED)
+#tf.random.set_seed(SEED)
 
 def normalize_img(x):
     # clipt, then 0 mean unit variance
