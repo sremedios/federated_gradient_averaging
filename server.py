@@ -18,6 +18,7 @@ import tensorflow as tf
 
 from models import cnn
 from models import resnet
+from models import reduced_unet
 
 '''
 # Determinism
@@ -50,6 +51,9 @@ server_step = None
 if dataset == "MNIST":
     k_init = iter(cnn.get_kernel_initializer())
     server_weights = cnn.cnn(k_init, n_channels=1, n_classes=10).trainable_variables
+elif dataset == "CT":
+    k_init = iter(reduced_unet.get_kernel_initializer())
+    server_weights = reduced_unet.reduced_unet(k_init, ds=1).trainable_variables
 else:
     #server_weights = cnn(k_init, n_channels=3, n_classes=7).trainable_variables
     k_init = iter(resnet.get_kernel_initializer())
@@ -61,6 +65,8 @@ else:
 def get_kernel_init():
     if dataset == "MNIST":
         k_iter = iter(cnn.get_kernel_initializer())
+    elif dataset == "CT":
+        k_iter = iter(reduced_unet.get_kernel_initializer())
     else:
         k_iter = iter(resnet.get_kernel_initializer())
     
