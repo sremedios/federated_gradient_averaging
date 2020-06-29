@@ -413,7 +413,7 @@ if __name__ == '__main__':
                
         #################### END-OF-EPOCH CALCULATIONS ####################
 		# write validation summary
-        with train_summary_writer.as_default():
+        with val_summary_writer.as_default():
             tf.summary.scalar('val_loss', val_loss.result(), step=cur_epoch)
             tf.summary.scalar('val_dice', val_dice.result(), step=cur_epoch)
         global_val_step += 1
