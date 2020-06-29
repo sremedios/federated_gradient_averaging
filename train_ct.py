@@ -46,11 +46,14 @@ def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
     put_successful = False
     while not put_successful:
         data = pickle.dumps(client_val)
-        response = requests.put(
-            URL + "put_val",
-            data=data, 
-            headers=client_headers,
-        )
+        try:
+            response = requests.put(
+                URL + "put_val",
+                data=data, 
+                headers=client_headers,
+            )
+        except requests.exceptions.ConnectionError:
+            time.sleep(1)
         put_successful = pickle.loads(response.content)
         
         time.sleep(sleep_delay)
@@ -66,7 +69,7 @@ def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
         try:
             response = requests.get(URL + URL_TAG, headers=client_headers)
         except requests.exceptions.ConnectionError:
-            time.sleep(3)
+            time.sleep(1)
         server_val = pickle.loads(response.content)
         
         time.sleep(sleep_delay)
