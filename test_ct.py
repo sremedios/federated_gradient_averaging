@@ -91,6 +91,9 @@ if __name__ == '__main__':
         ct = normalize_img(ct)
         mask = nib.load(mask_fpath).get_fdata(dtype=np.float32)
 
+        print(ct.shape)
+        print(mask.shape)
+
         in_vols.append({
             'affine': affine,
             'header': header,
@@ -98,6 +101,8 @@ if __name__ == '__main__':
             'mask': mask,
             'name': ct_fpath.name,
         })
+
+    sys.exit()
 
     #################### SEGMENT ####################
     for MODE, SITE, col_name in tqdm(model_settings):
