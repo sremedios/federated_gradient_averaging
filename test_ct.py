@@ -88,7 +88,9 @@ if __name__ == '__main__':
         affine = obj.affine
         header = obj.header
         ct = obj.get_fdata(dtype=np.float32)
+        orig_shape = ct.shape
         ct = normalize_img(ct)
+        ct = pad(ct)
         mask = nib.load(mask_fpath).get_fdata(dtype=np.float32)
 
         print(ct.shape)
@@ -100,6 +102,7 @@ if __name__ == '__main__':
             'ct': ct,
             'mask': mask,
             'name': ct_fpath.name,
+            'orig_shape': orig_shape,
         })
 
     sys.exit()
@@ -123,6 +126,8 @@ if __name__ == '__main__':
             ct = in_vol['ct'].transpose(2,0,1)[..., np.newaxis]
             pred = model(ct, training=False)
             pred = pred.numpy().transpose(1,2,0,3)[:,:,:,0]
+            # unpad pred to get in same space as orig
+            pred = unpad(pred, in_vol['orig_shape'])
             preds.append(pred)
 
             # dice
