@@ -130,7 +130,10 @@ if __name__ == '__main__':
                 affine=in_vol['affine'], 
                 header=in_vol['header'],
             )
-            pred_fname = SEG_DIR / MODEL_NAME / in_vol['name']
+            out_dir = SEG_DIR / MODEL_NAME
+            if not out_dir.exists():
+                out_dir.mkdir(parents=True)
+            pred_fname = out_dir / in_vol['name']
             nib.save(obj, pred_fname)
 
         dice_df[col_name] = dices
@@ -150,4 +153,7 @@ if __name__ == '__main__':
     plt.yticks(np.arange(0,1.1,0.1), fontsize=20)
     # Spines
     sns.despine()
-    plt.savefig(Path("results/dice_coefs_site_{}.png".format(TEST_SITE)))
+    RESULTS_DIR = Path("results")
+    if not RESULTS_DIR.exists():
+        RESULTS_DIR.mkdir(parents=True)
+    plt.savefig(RESULTS_DIR / ("dice_coefs_testsite_{}.png".format(TEST_SITE)))
