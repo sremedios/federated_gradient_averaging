@@ -12,6 +12,7 @@ import numpy as np
 import nibabel as nib
 
 from models.losses import *
+from utils.pad import *
 from utils.plot import *
 
 #################### HYPERPARAMS / ARGS ####################
@@ -52,11 +53,14 @@ for MODE, SITE, col_name in model_settings:
     pred_fpaths = sorted([x for x in fpaths if not x.is_dir()])
     
     dices = []
-    for m_fpath, p_fpath in zip(mask_fpaths, pred_fpaths):
+    for m_fpath, p_fpath in tqdm(zip(mask_fpaths, pred_fpaths), total=len(mask_fpaths)):
         mask = nib.load(m_fpath).get_fdata()
         pred = nib.load(p_fpath).get_fdata()
-        
-        dices.append(dice_coef(pred, mask).numpy())
+
+        mask = pad(mask)
+        pred = pad(pred)
+
+        dices.append(dice_coef(mask, pred).numpy())
     
     dice_df[col_name] = dices
     
