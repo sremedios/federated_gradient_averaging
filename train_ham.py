@@ -18,6 +18,8 @@ from utils.misc import *
 from utils.load_ham import *
 from utils.opt_utils import *
 
+
+'''
 # Determinism
 import random
 from tfdeterminism import patch   
@@ -27,7 +29,7 @@ os.environ['PYTHONHASHSEED'] = str(SEED)
 random.seed(SEED)                                                               
 np.random.seed(SEED)                                                            
 tf.random.set_seed(SEED)
-
+'''
 
 def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
     ########## SEND ##########
@@ -76,7 +78,6 @@ if __name__ == '__main__':
     
     ### GPU settings ###
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
-        
     # Hyperparams 
     BATCH_SIZE = 42
     N_EPOCHS = 100   

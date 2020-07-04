@@ -2,7 +2,7 @@ MODE=${1}
 SITE=${2}
 GPU=${3}
 
-DATADIR="/nfs/share5/remedis/data/CQS_TBI/manually_segmented/train/preprocessed"
+DATADIR="/ISFILE3/USERS/remediossw/data/hemorrhage_segmentation/train/preprocessed"
 
 if [ ${MODE} = "local" ]
 then

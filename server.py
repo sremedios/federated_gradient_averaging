@@ -20,6 +20,7 @@ from models import cnn
 from models import resnet
 from models import reduced_unet
 
+'''
 # Determinism
 import random
 from tfdeterminism import patch   
@@ -29,6 +30,7 @@ os.environ['PYTHONHASHSEED'] = str(SEED)
 random.seed(SEED)                                                               
 np.random.seed(SEED)                                                            
 tf.random.set_seed(SEED)
+'''
 
 
 dataset = sys.argv[1] # MNIST or HAM10000

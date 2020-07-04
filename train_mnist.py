@@ -18,6 +18,7 @@ from utils.misc import *
 from utils.load_mnist import *
 from utils.opt_utils import *
 
+'''
 # Determinism
 import random
 from tfdeterminism import patch   
@@ -27,6 +28,7 @@ os.environ['PYTHONHASHSEED'] = str(SEED)
 random.seed(SEED)                                                               
 np.random.seed(SEED)                                                            
 tf.random.set_seed(SEED)
+'''
 
 
 def federate_vals(URL, client_val, client_headers, sleep_delay=0.01):
