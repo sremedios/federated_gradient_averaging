@@ -97,6 +97,7 @@ if __name__ == '__main__':
             continue
 
         ct = pad(ct)
+        mask = pad(mask)
 
         in_vols.append({
             'affine': affine,
@@ -128,14 +129,13 @@ if __name__ == '__main__':
             pred = model(ct, training=False)
             pred = pred.numpy().transpose(1,2,0,3)[:,:,:,0]
 
-            # unpad pred to get in same space as orig
-            pred = unpad(pred, in_vol['orig_shape'])
-            preds.append(pred)
-
             # dice
             dice = dice_coef(pred, in_vol['mask']).numpy()
             dices.append(dice)
 
+            # unpad pred to get in same space as orig
+            pred = unpad(pred, in_vol['orig_shape'])
+            preds.append(pred)
 
             # save nifti
             obj = nib.Nifti1Image(
