@@ -134,7 +134,7 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = GPU_ID
         
     # Hyperparams 
-    PATCH_SIZE = (64, 64, 1)
+    PATCH_SIZE = (256, 256, 1)
     BATCH_SIZE = 256
     N_EPOCHS = 100
     LEARNING_RATE = 1e-4
