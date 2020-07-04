@@ -130,7 +130,7 @@ if __name__ == '__main__':
             pred = pred.numpy().transpose(1,2,0,3)[:,:,:,0]
 
             # dice
-            dice = dice_coef(pred, in_vol['mask']).numpy()
+            dice = dice_coef(in_vol['mask'], pred).numpy()
             dices.append(dice)
 
             # unpad pred to get in same space as orig
