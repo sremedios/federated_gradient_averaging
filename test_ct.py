@@ -16,6 +16,7 @@ import nibabel as nib
 
 from models.losses import *
 from utils.plot import *
+from utils.pad import *
 
 tick_size = 20
 
@@ -90,11 +91,12 @@ if __name__ == '__main__':
         ct = obj.get_fdata(dtype=np.float32)
         orig_shape = ct.shape
         ct = normalize_img(ct)
-        ct = pad(ct)
         mask = nib.load(mask_fpath).get_fdata(dtype=np.float32)
 
-        print(ct.shape)
-        print(mask.shape)
+        if ct.shape != mask.shape:
+            continue
+
+        ct = pad(ct)
 
         in_vols.append({
             'affine': affine,
@@ -105,7 +107,6 @@ if __name__ == '__main__':
             'orig_shape': orig_shape,
         })
 
-    sys.exit()
 
     #################### SEGMENT ####################
     for MODE, SITE, col_name in tqdm(model_settings):
@@ -126,6 +127,7 @@ if __name__ == '__main__':
             ct = in_vol['ct'].transpose(2,0,1)[..., np.newaxis]
             pred = model(ct, training=False)
             pred = pred.numpy().transpose(1,2,0,3)[:,:,:,0]
+
             # unpad pred to get in same space as orig
             pred = unpad(pred, in_vol['orig_shape'])
             preds.append(pred)
@@ -133,6 +135,7 @@ if __name__ == '__main__':
             # dice
             dice = dice_coef(pred, in_vol['mask']).numpy()
             dices.append(dice)
+
 
             # save nifti
             obj = nib.Nifti1Image(
