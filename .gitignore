@@ -7,6 +7,9 @@
 # no need to share notebooks
 **/*.ipynb
 
+# Ignore runscripts
+runscripts/
+
 # ignore data directory
 data/
 **/*.tfrecords
