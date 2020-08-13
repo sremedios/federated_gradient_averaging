@@ -20,6 +20,7 @@ def multiplot(imgs, titles, vmin=None, vmax=None):
         ax.set_xticks([])
         ax.set_yticks([])
 
+    plt.tight_layout()
     plt.show()
     
 def anim_paired_patches(lr_patch, hr_patch):
