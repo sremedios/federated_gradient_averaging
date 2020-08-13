@@ -16,6 +16,7 @@ An example command line argument to train MNIST with cyclic weight transfer usin
 
 # Citation
 Please consider citing our paper:
+```
 @article{remedios2020FederatedGradientAveraging,
   title={Federated Gradient Averaging for Multi-Site Training with Momentum-Based Optimizers},
   author={Remedios, Samuel W and Butman, John A and Landman, Bennett A and Pham, Dzung L},
@@ -23,3 +24,4 @@ Please consider citing our paper:
   year={2020},
   organization={Springer}
 }
+```
