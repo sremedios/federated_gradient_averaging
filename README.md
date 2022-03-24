@@ -15,7 +15,7 @@ An example command line argument to train MNIST with cyclic weight transfer usin
 `python train_ct.py A cyclic 0 /path/to/training/set/ 10203`
 
 # Citation
-Please consider citing our paper:
+Please consider citing our relevant papers:
 ```
 @article{remedios2020FederatedGradientAveraging,
   title={Federated Gradient Averaging for Multi-Site Training with Momentum-Based Optimizers},
@@ -23,5 +23,16 @@ Please consider citing our paper:
   booktitle={International Conference on Medical Image Computing and Computer-Assisted Intervention},
   year={2020},
   organization={Springer}
+}
+
+@article{remedios2020DistributedDeepLearning,
+  title={Distributed deep learning across multisite datasets for generalized CT hemorrhage segmentation},
+  author={Remedios, Samuel W and Roy, Snehashis and Bermudez, Camilo and Patel, Mayur B and Butman, John A and Landman, Bennett A and Pham, Dzung L},
+  journal={Medical physics},
+  volume={47},
+  number={1},
+  pages={89--98},
+  year={2020},
+  publisher={Wiley Online Library}
 }
 ```
